@@ -3,5 +3,6 @@ import react from "@vitejs/plugin-react";
 import { marinaDevIpcPlugin } from "./marinaDevIpcPlugin";
 
 export default defineConfig({
+  base: "./",
   plugins: [react(), marinaDevIpcPlugin()]
 });
