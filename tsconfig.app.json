@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "types": ["vite/client"]
+  },
+  "include": ["src/main.tsx", "src/api/**/*.ts", "src/app/**/*.ts", "src/app/**/*.tsx", "src/features/closure/ClosureScreen.tsx", "src/features/pos/**/*.ts", "src/features/pos/**/*.tsx", "src/features/stock/**/*.ts", "src/features/stock/**/*.tsx", "src/features/products/**/*.ts", "src/features/products/**/*.tsx", "src/types/**/*.ts", "src/utils/**/*.ts"]
+}
