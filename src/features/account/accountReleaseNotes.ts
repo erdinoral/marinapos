@@ -1,7 +1,11 @@
-export const APP_VERSION = "1.7.1";
+export const APP_VERSION = "1.7.2";
 export const APP_RELEASE_DATE = "04 Haziran 2026";
 
 export const APP_RELEASE_NOTES: { title: string; body: string }[] = [
+  {
+    title: "Kurulum boyutu",
+    body: "Gereksiz platform dosyalari (Mac/Linux), sharp ve fazla WASM kaldirildi. Kurulum yaklasik %30 daha kucuk."
+  },
   {
     title: "Guncelleme (Ayarlar)",
     body: "Ayarlar ekraninda GitHub Release uzerinden surum kontrolu, indirme ve kurulum. Veriler (satis, stok, ayarlar) guncellemeden sonra korunur."

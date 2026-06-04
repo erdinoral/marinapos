@@ -10,7 +10,9 @@ reports/
 data/
 release/
 release-build/
+release-opt/
 release-*/
+public/transformers-wasm/*.wasm
 build/license-registry.url
 build/supabase-license.json
 .env

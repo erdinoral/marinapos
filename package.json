@@ -1,6 +1,6 @@
 {
   "name": "marina-nargile-pos",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "private": true,
   "description": "Marina Nargile POS otomasyon",
   "author": "Marina",
@@ -10,7 +10,7 @@
     "electron:mark-cjs": "node scripts/ensure-dist-electron-cjs.mjs",
     "dev": "concurrently \"vite\" \"tsc -p tsconfig.electron.json --watch\" \"wait-on tcp:5173 file:dist-electron/electron/main.js && npm run electron:mark-cjs && electron .\"",
     "copy:wasm": "node scripts/copy-transformers-wasm.mjs",
-    "build": "npm run copy:wasm && tsc -b && vite build && tsc -p tsconfig.electron.json && npm run electron:mark-cjs",
+    "build": "tsc -b && vite build && tsc -p tsconfig.electron.json && npm run electron:mark-cjs",
     "postinstall": "node scripts/copy-transformers-wasm.mjs",
     "pack": "npm run build && electron-builder --win --config.npmRebuild=false",
     "publish:win": "npm run build && electron-builder --win --publish always --config.npmRebuild=false",
@@ -56,18 +56,26 @@
     },
     "files": [
       "dist/**/*",
+      "!dist/transformers-wasm{,/**}",
       "dist-electron/**/*",
       "build/icons/**/*",
       "build/license-registry.url",
       "build/supabase-license.json",
-      "package.json"
+      "package.json",
+      "!**/node_modules/sharp{,/**}",
+      "!**/node_modules/onnxruntime-node/bin/napi-v3/darwin{,/**}",
+      "!**/node_modules/onnxruntime-node/bin/napi-v3/linux{,/**}",
+      "!**/node_modules/onnxruntime-node/bin/napi-v3/win32/arm64{,/**}",
+      "!**/node_modules/@xenova/transformers/dist/ort-wasm.wasm",
+      "!**/node_modules/@xenova/transformers/dist/ort-wasm-threaded.wasm",
+      "!**/node_modules/@xenova/transformers/dist/ort-wasm-simd-threaded.wasm"
     ],
     "asar": true,
     "npmRebuild": false,
     "asarUnpack": [
-      "node_modules/onnxruntime-node/**",
-      "node_modules/@xenova/transformers/**"
+      "node_modules/onnxruntime-node/bin/napi-v3/win32/x64/**"
     ],
+    "afterPack": "scripts/prune-win-unpacked.mjs",
     "win": {
       "icon": "build/icons/icon.ico",
       "target": [
