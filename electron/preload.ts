@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld("marinaApi", {
   deleteCategory: (categoryId: number) => ipcRenderer.invoke("categories:delete", categoryId),
   addStock: (productId: number, quantity: number, input: import("../src/types/models").StockAddInput) =>
     ipcRenderer.invoke("products:add-stock", productId, quantity, input),
+  nextReceiveBatchId: () => ipcRenderer.invoke("products:next-receive-batch-id") as Promise<string>,
   adjustStock: (productId: number, countedQty: number, note = "") =>
     ipcRenderer.invoke("products:adjust-stock", productId, countedQty, note),
   lowStock: () => ipcRenderer.invoke("products:low-stock"),
@@ -53,8 +54,13 @@ contextBridge.exposeInMainWorld("marinaApi", {
     extraFeeKurus?: number
   ) =>
     ipcRenderer.invoke("sales:create", items, paymentType, paidAmount, kind, cartName, customerId ?? null, extraFeeKurus ?? 0),
-  recordCustomerDebtPayment: (customerId: number, paymentType: PaymentType, amountKurus?: number) =>
-    ipcRenderer.invoke("sales:record-debt-payment", customerId, paymentType, amountKurus ?? null),
+  recordCustomerDebtPayment: (
+    customerId: number,
+    paymentType: PaymentType,
+    amountKurus?: number,
+    paymentNote?: string
+  ) =>
+    ipcRenderer.invoke("sales:record-debt-payment", customerId, paymentType, amountKurus ?? null, paymentNote ?? null),
   listCustomers: () => ipcRenderer.invoke("customers:list"),
   createCustomer: (payload: CustomerInput) => ipcRenderer.invoke("customers:create", payload),
   updateCustomer: (customerId: number, patch: Partial<CustomerInput>) =>
@@ -68,6 +74,19 @@ contextBridge.exposeInMainWorld("marinaApi", {
   setCustomerProductPrice: (customerId: number, productId: number, priceKurus: number) =>
     ipcRenderer.invoke("customers:set-product-price", customerId, productId, priceKurus),
   getSupplierOverview: (supplierId: number) => ipcRenderer.invoke("suppliers:overview", supplierId),
+  recordSupplierDebtPayment: (
+    supplierId: number,
+    paymentType: PaymentType,
+    amountKurus?: number,
+    paymentNote?: string
+  ) =>
+    ipcRenderer.invoke(
+      "suppliers:record-debt-payment",
+      supplierId,
+      paymentType,
+      amountKurus ?? null,
+      paymentNote ?? null
+    ),
   getDailySales: (date: string) => ipcRenderer.invoke("sales:daily", date),
   getDailySaleProductIds: (date: string) => ipcRenderer.invoke("sales:daily-product-ids", date),
   getSaleWithLines: (saleId: number) => ipcRenderer.invoke("sales:detail", saleId),

@@ -52,6 +52,7 @@ function createDevServerMarinaApi(): MarinaApi {
     deleteCategory: (categoryId) => devInvoke("categories:delete", [categoryId]),
     addStock: (productId, quantity, input: StockAddInput) =>
       devInvoke("products:add-stock", [productId, quantity, input]),
+    nextReceiveBatchId: () => devInvoke("products:next-receive-batch-id"),
     adjustStock: (productId, countedQty, note = "") =>
       devInvoke("products:adjust-stock", [productId, countedQty, note]),
     lowStock: () => devInvoke("products:low-stock"),
@@ -69,8 +70,12 @@ function createDevServerMarinaApi(): MarinaApi {
       customerId?: number | null,
       extraFeeKurus?: number
     ) => devInvoke("sales:create", [items, paymentType, paidAmount, kind, cartName, customerId ?? null, extraFeeKurus ?? 0]),
-    recordCustomerDebtPayment: (customerId: number, paymentType: PaymentType, amountKurus?: number) =>
-      devInvoke("sales:record-debt-payment", [customerId, paymentType, amountKurus ?? null]),
+    recordCustomerDebtPayment: (
+      customerId: number,
+      paymentType: PaymentType,
+      amountKurus?: number,
+      paymentNote?: string
+    ) => devInvoke("sales:record-debt-payment", [customerId, paymentType, amountKurus ?? null, paymentNote ?? null]),
     listCustomers: () => devInvoke("customers:list"),
     createCustomer: (payload: CustomerInput) => devInvoke("customers:create", [payload]),
     updateCustomer: (customerId: number, patch: Partial<CustomerInput>) =>
@@ -83,6 +88,13 @@ function createDevServerMarinaApi(): MarinaApi {
     setCustomerProductPrice: (customerId: number, productId: number, priceKurus: number) =>
       devInvoke("customers:set-product-price", [customerId, productId, priceKurus]),
     getSupplierOverview: (supplierId: number) => devInvoke("suppliers:overview", [supplierId]),
+    recordSupplierDebtPayment: (
+      supplierId: number,
+      paymentType: PaymentType,
+      amountKurus?: number,
+      paymentNote?: string
+    ) =>
+      devInvoke("suppliers:record-debt-payment", [supplierId, paymentType, amountKurus ?? null, paymentNote ?? null]),
     getDailySales: (date) => devInvoke("sales:daily", [date]),
     getDailySaleProductIds: (date) => devInvoke("sales:daily-product-ids", [date]),
     getSaleWithLines: (saleId) => devInvoke("sales:detail", [saleId]),

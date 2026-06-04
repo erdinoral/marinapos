@@ -45,7 +45,8 @@ function pickCatalog(state: MarinaStore): Partial<MarinaStore> {
       stockMovementId: 0,
       closureId: 0,
       customerId: 0,
-      cashflowEntryId: 0
+      cashflowEntryId: 0,
+      stockReceiveBatchId: 0
     }
   };
 }
@@ -65,7 +66,8 @@ function pickCustomers(state: MarinaStore): Partial<MarinaStore> {
       supplierId: 0,
       tobaccoAromaId: 0,
       cashflowEntryId: 0,
-      stockCostLayerId: 0
+      stockCostLayerId: 0,
+      stockReceiveBatchId: 0
     }
   };
 }
@@ -85,7 +87,8 @@ function pickSales(state: MarinaStore): Partial<MarinaStore> {
       supplierId: 0,
       tobaccoAromaId: 0,
       cashflowEntryId: 0,
-      stockCostLayerId: 0
+      stockCostLayerId: 0,
+      stockReceiveBatchId: 0
     }
   };
 }
@@ -105,7 +108,8 @@ function pickStock(state: MarinaStore): Partial<MarinaStore> {
       customerId: 0,
       supplierId: 0,
       tobaccoAromaId: 0,
-      cashflowEntryId: 0
+      cashflowEntryId: 0,
+      stockReceiveBatchId: state.sequences.stockReceiveBatchId
     }
   };
 }
@@ -124,7 +128,8 @@ function pickClosures(state: MarinaStore): Partial<MarinaStore> {
       supplierId: 0,
       tobaccoAromaId: 0,
       cashflowEntryId: 0,
-      stockCostLayerId: 0
+      stockCostLayerId: 0,
+      stockReceiveBatchId: 0
     }
   };
 }
@@ -143,7 +148,8 @@ function pickCashflow(state: MarinaStore): Partial<MarinaStore> {
       customerId: 0,
       supplierId: 0,
       tobaccoAromaId: 0,
-      stockCostLayerId: 0
+      stockCostLayerId: 0,
+      stockReceiveBatchId: 0
     }
   };
 }

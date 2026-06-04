@@ -199,6 +199,8 @@ function dispatch(db: DatabaseService, logs: ErrorLogService, channel: string, a
       return db.products.deleteCategory(Number(args[0]));
     case "products:add-stock":
       return db.products.addStock(Number(args[0]), Number(args[1]), (args[2] ?? {}) as StockAddInput);
+    case "products:next-receive-batch-id":
+      return db.products.nextReceiveBatchId();
     case "products:adjust-stock":
       return db.products.adjustStock(Number(args[0]), Number(args[1]), String(args[2] ?? ""));
     case "products:low-stock":
@@ -248,7 +250,8 @@ function dispatch(db: DatabaseService, logs: ErrorLogService, channel: string, a
       return db.sales.recordDebtPayment(
         Number(args[0]),
         args[1] as PaymentType,
-        args[2] != null && Number.isFinite(Number(args[2])) ? Number(args[2]) : undefined
+        args[2] != null && Number.isFinite(Number(args[2])) ? Number(args[2]) : undefined,
+        args[3] != null ? String(args[3]) : undefined
       );
     case "customers:list":
       return db.customers.list();
@@ -272,6 +275,14 @@ function dispatch(db: DatabaseService, logs: ErrorLogService, channel: string, a
       return undefined;
     case "suppliers:overview":
       return db.products.getSupplierOverview(Number(args[0]));
+    case "suppliers:record-debt-payment":
+      db.products.recordSupplierDebtPayment(
+        Number(args[0]),
+        args[1] as import("./src/types/models").PaymentType,
+        args[2] != null && Number.isFinite(Number(args[2])) ? Number(args[2]) : undefined,
+        args[3] != null ? String(args[3]) : undefined
+      );
+      return undefined;
     case "sales:daily":
       return db.sales.getByDate(String(args[0] ?? ""));
     case "sales:daily-product-ids":

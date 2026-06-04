@@ -21,11 +21,14 @@ import { LicenseLockScreen } from "../features/license/LicenseLockScreen";
 import { LICENSE_CHECK_INTERVAL_MS } from "../config/license";
 import { Category, LicenseStatus, Product, Settings, Supplier } from "../types/models";
 import logoSrc from "../assets/marina-logo.png";
+import { BrandTitle, DEFAULT_APP_TITLE } from "./BrandTitle";
+import { useKeyboardFocusRecovery } from "../hooks/useKeyboardFocusRecovery";
 
 type Tab = "pos" | "tobacco" | "stock" | "product" | "closure" | "table" | "report" | "account" | "settings";
 type ReportSubTab = "dashboard" | "cashflow" | "monthend";
 
 export function App() {
+  useKeyboardFocusRecovery();
   const [showSplash, setShowSplash] = useState(true);
   const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
   const [licenseChecking, setLicenseChecking] = useState(false);
@@ -42,6 +45,7 @@ export function App() {
     lowStockThreshold: 10,
     openingCashKurus: 0,
     openingCashDate: "",
+    appTitle: DEFAULT_APP_TITLE,
     companyName: "Marina Nargile Hookah World",
     companyAddress: "",
     companyPhone: "",
@@ -186,7 +190,13 @@ export function App() {
       <header className="topbar">
         <div className="brand">
           <img src={logoSrc} alt="Marina Nargile" className="brand-logo" />
-          <h1>Marina Nargile Otomasyon</h1>
+          <BrandTitle
+            title={settings.appTitle?.trim() || DEFAULT_APP_TITLE}
+            onSave={async (appTitle) => {
+              await getMarinaApi().setCompanyInfo({ appTitle });
+              setSettings((s) => ({ ...s, appTitle }));
+            }}
+          />
           <motion.span
             className="barcode-indicator"
             animate={{ opacity: [0.35, 1, 0.35], scale: [1, 1.2, 1] }}
@@ -319,7 +329,7 @@ export function App() {
         )}
         {tab === "settings" && (
           <motion.div key="settings" className="app-tab-content" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
-            <SettingsScreen />
+            <SettingsScreen onSettingsChange={refresh} />
           </motion.div>
         )}
       </AnimatePresence>

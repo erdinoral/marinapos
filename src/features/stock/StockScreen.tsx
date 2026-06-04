@@ -18,7 +18,6 @@ import {
   formatQtyShort,
   formatTlPer1000g,
   incomingCostTlToUnitCostKurus,
-  inventoryCostKurus,
   inventoryRevenueKurus,
   kurusPerGramToTlPer1000g,
   normalizeGramQty,
@@ -26,20 +25,16 @@ import {
 } from "../../utils/saleUnit";
 import { formatTry, parseTrAmount, tlToKurus } from "../../utils/currency";
 import { resolveStockEntryUnitCostKurus, stockCostModeLabel } from "../../utils/stockCost";
-import { inventoryCostFromLayers } from "../../utils/fifoStockCost";
+import { computeInventoryTotals, lineInventoryCostKurus } from "../../utils/inventoryTotals";
+import { StockInventorySummary } from "./StockInventorySummary";
 import { suppliersWithDebt, totalSupplierDebtKurus } from "../../utils/supplierDebt";
 import { BarcodePrintModal } from "./BarcodePrintModal";
 import { StockCostFields } from "./StockCostFields";
+import { ReceiveStockModal } from "./ReceiveStockModal";
 
 function netRetailUnitKurus(p: Product): number {
   const d = Math.max(0, Math.min(100, Number(p.discountPercent ?? 0)));
   return Math.round((p.priceKurus * (100 - d)) / 100);
-}
-
-function lineInventoryCostKurus(p: Product, unit: CategorySaleUnit, layers: StockCostLayer[]): number {
-  const fromFifo = inventoryCostFromLayers(layers, p.id, unit);
-  if (fromFifo > 0) return fromFifo;
-  return inventoryCostKurus(p, unit);
 }
 
 function defaultCostTlForProduct(p: Product, unit: CategorySaleUnit): string {
@@ -67,10 +62,6 @@ type StockAddPrefill = {
   invoicePaidTl?: string;
   remainingDebtTl?: string;
 };
-
-function linePotentialRevenueKurus(p: Product, unit: CategorySaleUnit): number {
-  return inventoryRevenueKurus(p, unit);
-}
 
 interface Props {
   products: Product[];
@@ -103,13 +94,6 @@ export function StockScreen({ products, lowStock, categories, suppliers, lowStoc
   const [stockRowContext, setStockRowContext] = useState<{ x: number; y: number; product: Product } | null>(null);
   /** Eksik listeden acilan gelen / stok ekle modal */
   const [receiveStockProduct, setReceiveStockProduct] = useState<Product | null>(null);
-  const [receiveStockQty, setReceiveStockQty] = useState(1);
-  const [receiveIncomingCostTl, setReceiveIncomingCostTl] = useState("");
-  const [receiveCostMode, setReceiveCostMode] = useState<StockCostMode>("product");
-  const [receiveInvoicePaidTl, setReceiveInvoicePaidTl] = useState("");
-  const [receiveRemainingDebtTl, setReceiveRemainingDebtTl] = useState("");
-  const [receiveSupplierId, setReceiveSupplierId] = useState(0);
-  const [receiveStockSaving, setReceiveStockSaving] = useState(false);
   /** Stok listesinden acilan sayim / stok duzelt modal */
   const [listAdjustProduct, setListAdjustProduct] = useState<Product | null>(null);
   const [listAdjustCounted, setListAdjustCounted] = useState("");
@@ -129,7 +113,6 @@ export function StockScreen({ products, lowStock, categories, suppliers, lowStoc
   }, []);
   const selectedProduct = useMemo(() => products.find((p) => p.id === selectedId) ?? null, [products, selectedId]);
   const selectedUnit = selectedProduct ? categorySaleUnitOf(categories, selectedProduct.categoryId) : "piece";
-  const receiveUnit = receiveStockProduct ? categorySaleUnitOf(categories, receiveStockProduct.categoryId) : "piece";
   const listAdjustUnit = listAdjustProduct ? categorySaleUnitOf(categories, listAdjustProduct.categoryId) : "piece";
 
   const filterProducts = useCallback(
@@ -216,15 +199,8 @@ export function StockScreen({ products, lowStock, categories, suppliers, lowStoc
   };
 
   const openReceiveStockModal = (product: Product) => {
-    const unit = categorySaleUnitOf(categories, product.categoryId);
     selectForStockAdd(product);
     setReceiveStockProduct(product);
-    setReceiveStockQty(unit === "gram" ? 1000 : 1);
-    setReceiveSupplierId(product.supplierId > 0 ? product.supplierId : 0);
-    setReceiveIncomingCostTl(defaultCostTlForProduct(product, unit));
-    setReceiveCostMode("product");
-    setReceiveInvoicePaidTl("");
-    setReceiveRemainingDebtTl("");
     setStockRowContext(null);
   };
 
@@ -338,49 +314,6 @@ export function StockScreen({ products, lowStock, categories, suppliers, lowStoc
       await onStockChange();
     } catch (e) {
       window.alert(e instanceof Error ? e.message : "Stok eklenemedi.");
-    }
-  };
-
-  const submitReceiveStock = async () => {
-    if (!receiveStockProduct) return;
-    const unit = categorySaleUnitOf(categories, receiveStockProduct.categoryId);
-    const raw = Math.round(Number(String(receiveStockQty).replace(",", ".")));
-    if (!Number.isFinite(raw) || raw <= 0) {
-      window.alert("Miktar gecersiz.");
-      return;
-    }
-    if (unit === "piece" && !Number.isInteger(raw)) {
-      window.alert("Adetli urunlerde miktar tam sayi olmalidir.");
-      return;
-    }
-    if (unit === "gram" && !Number.isInteger(raw)) {
-      window.alert("Gram miktar tam sayi olmalidir.");
-      return;
-    }
-    setReceiveStockSaving(true);
-    try {
-      const ok = await submitStockAdd(
-        receiveStockProduct,
-        raw,
-        unit,
-        receiveCostMode,
-        receiveIncomingCostTl,
-        receiveInvoicePaidTl,
-        receiveRemainingDebtTl,
-        receiveSupplierId
-      );
-      if (!ok) return;
-      setReceiveStockProduct(null);
-      setReceiveIncomingCostTl("");
-      setReceiveCostMode("product");
-      setReceiveInvoicePaidTl("");
-      setReceiveRemainingDebtTl("");
-      setReceiveSupplierId(0);
-      await onStockChange();
-    } catch (e) {
-      window.alert(e instanceof Error ? e.message : "Stok eklenemedi.");
-    } finally {
-      setReceiveStockSaving(false);
     }
   };
 
@@ -516,15 +449,6 @@ export function StockScreen({ products, lowStock, categories, suppliers, lowStoc
   }, [selectedId, selectedProduct, selectedUnit]);
 
   useEffect(() => {
-    if (!receiveStockProduct) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setReceiveStockProduct(null);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [receiveStockProduct]);
-
-  useEffect(() => {
     if (!listAdjustProduct) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !listAdjustSaving) setListAdjustProduct(null);
@@ -641,21 +565,10 @@ ${rows || `<tr><td colspan="3">Eksik urun yok</td></tr>`}
     }
   };
 
-  const listTotals = useMemo(() => {
-    let costKurus = 0;
-    let revenueKurus = 0;
-    for (const p of listFiltered) {
-      const unit = categorySaleUnitOf(categories, p.categoryId);
-      costKurus += lineInventoryCostKurus(p, unit, costLayers);
-      revenueKurus += linePotentialRevenueKurus(p, unit);
-    }
-    return {
-      skuCount: listFiltered.length,
-      costKurus,
-      revenueKurus,
-      profitKurus: revenueKurus - costKurus,
-    };
-  }, [listFiltered, categories, costLayers]);
+  const listTotals = useMemo(
+    () => computeInventoryTotals(listFiltered, categories, costLayers),
+    [listFiltered, categories, costLayers]
+  );
 
   return (
     <div className="stock-layout" ref={stockLayoutRef}>
@@ -738,25 +651,11 @@ ${rows || `<tr><td colspan="3">Eksik urun yok</td></tr>`}
             ))}
           </div>
         </div>
+        {listFiltered.length > 15 ? (
+          <p className="stock-list-scroll-hint">Liste en fazla 15 satir gosterir; tum urunler icin asagiya kaydirin.</p>
+        ) : null}
         {listFiltered.length > 0 ? (
-          <div className="stock-list-footer" aria-label="Liste ozeti">
-            <div className="stock-list-footer-line">
-              <span>Listede urun (satir)</span>
-              <strong>{listTotals.skuCount}</strong>
-            </div>
-            <div className="stock-list-footer-line">
-              <span>Toplam stok maliyeti (gelis)</span>
-              <strong>{formatTry(listTotals.costKurus)}</strong>
-            </div>
-            <div className="stock-list-footer-line">
-              <span>Hepsi satilirsa tahmini ciro (liste, urun indirimi dahil)</span>
-              <strong>{formatTry(listTotals.revenueKurus)}</strong>
-            </div>
-            <div className="stock-list-footer-line stock-list-footer-profit">
-              <span>Tahmini brut kar (ciro - maliyet)</span>
-              <strong>{formatTry(listTotals.profitKurus)}</strong>
-            </div>
-          </div>
+          <StockInventorySummary totals={listTotals} />
         ) : (
           <p className="stock-help small stock-list-empty-hint">Filtreye uyan urun yok.</p>
         )}
@@ -1090,82 +989,14 @@ ${rows || `<tr><td colspan="3">Eksik urun yok</td></tr>`}
         </ul>
       ) : null}
       {receiveStockProduct ? (
-        <div
-          className="modal-backdrop"
-          role="presentation"
-          onMouseDown={() => {
-            if (!receiveStockSaving) setReceiveStockProduct(null);
-          }}
-        >
-          <div
-            className="modal-dialog stock-receive-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="stock-receive-title"
-            onMouseDown={(e) => e.stopPropagation()}
-          >
-            <h3 id="stock-receive-title">Gelen / stok ekle</h3>
-            <p className="stock-receive-product-name">{receiveStockProduct.name}</p>
-            <p className="stock-help small">
-              Mevcut: <strong>{stockLabelForProduct(receiveStockProduct)}</strong> — Tedarikci: {supplierLabel(receiveStockProduct)}
-            </p>
-            <label className="stock-receive-qty-label">
-              {receiveUnit === "gram" ? "Eklenecek gram" : "Eklenecek adet"}
-              <input
-                type="number"
-                min={receiveUnit === "gram" ? 1 : 1}
-                step="1"
-                value={receiveStockQty}
-                onChange={(e) => {
-                  const n = Number(e.target.value);
-                  setReceiveStockQty(receiveUnit === "gram" ? Math.max(1, Math.round(n || 0)) : n);
-                }}
-                disabled={receiveStockSaving}
-              />
-            </label>
-            <label className="stock-receive-qty-label">
-              Tedarikci *
-              <select
-                value={receiveSupplierId}
-                disabled={receiveStockSaving}
-                onChange={(e) => setReceiveSupplierId(Number(e.target.value))}
-              >
-                <option value={0}>Tedarikci secin</option>
-                {suppliers.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.name}
-                    {s.balanceOwedKurus > 0 ? ` — borc ${formatTry(s.balanceOwedKurus)}` : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <StockCostFields
-              saleUnit={receiveUnit}
-              qty={receiveStockQty}
-              costMode={receiveCostMode}
-              onCostModeChange={setReceiveCostMode}
-              incomingCostTl={receiveIncomingCostTl}
-              onIncomingCostTlChange={setReceiveIncomingCostTl}
-              invoicePaidTl={receiveInvoicePaidTl}
-              onInvoicePaidTlChange={setReceiveInvoicePaidTl}
-              remainingDebtTl={receiveRemainingDebtTl}
-              onRemainingDebtTlChange={setReceiveRemainingDebtTl}
-              disabled={receiveStockSaving}
-              product={receiveStockProduct}
-            />
-            <p className="stock-help small">
-              Miktar, maliyet ve tedarikci kaydi ilgili tedarikci gecmisine yazilir; gider gelir-gidere yansir.
-            </p>
-            <div className="modal-actions">
-              <button type="button" disabled={receiveStockSaving} onClick={() => setReceiveStockProduct(null)}>
-                Vazgec
-              </button>
-              <button type="button" className="primary" disabled={receiveStockSaving} onClick={() => void submitReceiveStock()}>
-                {receiveStockSaving ? "Ekleniyor..." : receiveUnit === "gram" ? "Stoka gram ekle" : "Stoka adet ekle"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ReceiveStockModal
+          products={products}
+          categories={categories}
+          suppliers={suppliers}
+          initialProduct={receiveStockProduct}
+          onClose={() => setReceiveStockProduct(null)}
+          onSaved={onStockChange}
+        />
       ) : null}
       {detailProduct ? (
         <div
@@ -1188,7 +1019,7 @@ ${rows || `<tr><td colspan="3">Eksik urun yok</td></tr>`}
               const costUnit = live.costPriceKurus ?? 0;
               const invCost = lineInventoryCostKurus(live, unit, costLayers);
               const netSell = netRetailUnitKurus(live);
-              const revenue = linePotentialRevenueKurus(live, unit);
+              const revenue = inventoryRevenueKurus(live, unit);
               const profit = revenue - invCost;
               const disc = live.discountPercent ?? 0;
               return (

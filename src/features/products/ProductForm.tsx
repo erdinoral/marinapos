@@ -16,7 +16,8 @@ import {
   tlPer1000gToKurusPerGram,
   wholesalePricePlaceholder
 } from "../../utils/saleUnit";
-import { tlToKurus } from "../../utils/currency";
+import { parseTrAmount, tlToKurus } from "../../utils/currency";
+import { lineCostKurusFromUnit } from "../../utils/stockCost";
 import { CategoryStockHint } from "./CategoryForm";
 
 interface Props {
@@ -45,7 +46,8 @@ const initialState = {
   wholesaleTl: "",
   alternateTl: "",
   posFavorite: false,
-  sellsWholesale: false
+  sellsWholesale: false,
+  initialRemainingDebtTl: ""
 };
 
 export function ProductForm({ categories, suppliers, products, onCreated }: Props) {
@@ -136,6 +138,28 @@ export function ProductForm({ categories, suppliers, products, onCreated }: Prop
       }
     }
 
+    let initialStockRemainingDebtKurus: number | undefined;
+    const stockRounded = Math.round(stockQty);
+    const costPriceKurus =
+      saleUnit === "gram" ? costTlPer1000gToCostPriceKurus(costTl) : tlToKurus(costTl);
+    if (stockRounded > 0 && costPriceKurus > 0 && String(form.initialRemainingDebtTl).trim() !== "") {
+      const debtParsed = parseTrAmount(form.initialRemainingDebtTl);
+      if (debtParsed == null || !Number.isFinite(debtParsed) || debtParsed < 0) {
+        setFormMessage("Kalan borc gecersiz.");
+        return;
+      }
+      initialStockRemainingDebtKurus = tlToKurus(debtParsed);
+      const lineCost = lineCostKurusFromUnit(costPriceKurus, stockRounded, saleUnit);
+      if (initialStockRemainingDebtKurus > lineCost) {
+        setFormMessage("Kalan borc alis tutarindan fazla olamaz.");
+        return;
+      }
+      if (initialStockRemainingDebtKurus > 0 && form.supplierId <= 0) {
+        setFormMessage("Borc icin tedarikci secin.");
+        return;
+      }
+    }
+
     try {
       const vat = Number(form.vatRatePercent || 20);
       const wholesaleTl = Number(String(form.wholesaleTl).replace(",", "."));
@@ -151,8 +175,9 @@ export function ProductForm({ categories, suppliers, products, onCreated }: Prop
         code,
         priceKurus: saleUnit === "gram" ? tlPer1000gToKurusPerGram(priceTl) : tlToKurus(priceTl),
         discountPercent,
-        costPriceKurus: saleUnit === "gram" ? costTlPer1000gToCostPriceKurus(costTl) : tlToKurus(costTl),
-        stockQty: Math.round(stockQty),
+        costPriceKurus,
+        stockQty: stockRounded,
+        ...(initialStockRemainingDebtKurus != null ? { initialStockRemainingDebtKurus } : {}),
         imagePath: form.imagePath.trim(),
         categoryId: form.categoryId,
         supplierId: form.supplierId,
@@ -397,10 +422,25 @@ export function ProductForm({ categories, suppliers, products, onCreated }: Prop
         }}
         required
       />
+      {form.supplierId > 0 && Number(form.stockQty) > 0 && Number(form.costTl || 0) >= 0 ? (
+        <label className="product-form-debt-field">
+          <span>Kalan borc (TL)</span>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={form.initialRemainingDebtTl}
+            onChange={(e) => setForm({ ...form, initialRemainingDebtTl: e.target.value })}
+            placeholder="Bos = tam odendi"
+            autoComplete="off"
+          />
+          <span className="form-note">
+            Alisin odenmeyen kismi tedarikci borcuna eklenir. Bu ekrandan gider yazilmaz; odeme kaydi icin Stok → Stok ekle kullanin.
+          </span>
+        </label>
+      ) : null}
       <p className="form-note product-form-section-note">
-        Ilk stok ve birim maliyet girilirse tutar <strong>Rapor → Gelir/Gider</strong> ekraninda{" "}
-        <strong>Mal alimi / stok</strong> olarak gunluk gidere yazilir. Sonraki alimlar icin{" "}
-        <strong>Stok → Stok ekle</strong> kullanin.
+        <strong>Urun Ekle</strong> yalnizca kart ve ilk stok kaydi acar; <strong>gelir/gider</strong> listesine yazmaz. Odenen
+        alimlari <strong>Mal alimi / stok</strong> gidere yansitmak icin <strong>Stok → Stok ekle</strong> kullanin.
       </p>
       <div className="image-input-row">
         <input placeholder="Resim yolu (opsiyonel)" value={form.imagePath} onChange={(e) => setForm({ ...form, imagePath: e.target.value })} />

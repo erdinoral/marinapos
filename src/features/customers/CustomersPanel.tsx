@@ -11,11 +11,19 @@ import type {
   Product,
   SaleWithLines,
   StockEntryLogRow,
+  InvoiceCustomerInfo,
   PaymentType,
+  StockCostLayer,
   Supplier,
   SupplierInput,
   SupplierOverview
 } from "../../types/models";
+import { SaleInvoiceModal } from "../invoice/SaleInvoiceModal";
+import { StockInventorySummary } from "../stock/StockInventorySummary";
+import { SupplierStockBatchHistory } from "./SupplierStockBatchHistory";
+import { invoiceInfoFromCustomer } from "../../utils/invoiceFromCustomer";
+import { canCreateInvoiceForSale } from "../../utils/invoiceFromSale";
+import { computeInventoryTotals } from "../../utils/inventoryTotals";
 import { formatTry, parseTrAmount, tlToKurus } from "../../utils/currency";
 import { customerAddKindLabel, customerKindLabel, customerKindShort } from "../../utils/customerLabels";
 import {
@@ -23,6 +31,7 @@ import {
   renderSupplierLikeForm,
   supplierInputFromForm
 } from "./customerContactForm";
+import { DebtPaymentPanel } from "./DebtPaymentPanel";
 import { customersWithDebtByKind } from "../../utils/customerDebt";
 import { suppliersWithDebt } from "../../utils/supplierDebt";
 import { categorySaleUnitOf, formatQtyShort, kurusPerGramToTlPer1000g, tlPer1000gToKurusPerGram } from "../../utils/saleUnit";
@@ -103,8 +112,20 @@ export function CustomersPanel({
   const [purchaseRows, setPurchaseRows] = useState<CustomerPurchaseRow[]>([]);
   const [detailSales, setDetailSales] = useState<SaleWithLines[]>([]);
   const [detailSalesLoading, setDetailSalesLoading] = useState(false);
+  const [invoiceSale, setInvoiceSale] = useState<SaleWithLines | null>(null);
+  const [invoiceCustomer, setInvoiceCustomer] = useState<InvoiceCustomerInfo>({
+    fullName: "",
+    companyName: "",
+    tcOrVkn: "",
+    phone: "",
+    email: "",
+    address: "",
+    city: "",
+    district: ""
+  });
   const [productPrices, setProductPrices] = useState<CustomerProductPrice[]>([]);
   const [supplierOverview, setSupplierOverview] = useState<SupplierOverview | null>(null);
+  const [costLayers, setCostLayers] = useState<StockCostLayer[]>([]);
 
   const [ledgerTab, setLedgerTab] = useState<CustomersPanelColumn>("retail");
   const [ledgerAddOpen, setLedgerAddOpen] = useState(false);
@@ -113,6 +134,8 @@ export function CustomersPanel({
   const [ledgerAddSaving, setLedgerAddSaving] = useState(false);
   const [debtPaySaving, setDebtPaySaving] = useState(false);
   const [debtPayType, setDebtPayType] = useState<PaymentType>("cash");
+  const [debtPayAmountTl, setDebtPayAmountTl] = useState("");
+  const [debtPayNote, setDebtPayNote] = useState("");
   const [addForm, setAddForm] = useState({
     name: "",
     phone: "",
@@ -261,11 +284,26 @@ export function CustomersPanel({
   }, [selectedSupplier?.id, loadSupplierDetail, products]);
 
   useEffect(() => {
-    if (!editCustomer || detailTab !== "history") return;
+    const api = getMarinaApi();
+    if (typeof api.listStockCostLayers !== "function") return;
+    void api.listStockCostLayers().then(setCostLayers).catch(() => setCostLayers([]));
+  }, []);
+
+  const supplierInventoryTotals = useMemo(() => {
+    if (!selectedSupplier) return null;
+    const supplierProducts = products.filter((p) => p.supplierId === selectedSupplier.id && p.isActive === 1);
+    return computeInventoryTotals(supplierProducts, categories, costLayers);
+  }, [selectedSupplier, products, categories, costLayers]);
+
+  useEffect(() => {
+    if (!selectedCustomer || detailTab !== "history") {
+      setDetailSales([]);
+      return;
+    }
     let cancelled = false;
     setDetailSalesLoading(true);
     void getMarinaApi()
-      .getSalesForCustomer(editCustomer.id, 80)
+      .getSalesForCustomer(selectedCustomer.id, 200)
       .then((rows) => {
         if (!cancelled) setDetailSales(Array.isArray(rows) ? rows : []);
       })
@@ -275,7 +313,25 @@ export function CustomersPanel({
     return () => {
       cancelled = true;
     };
-  }, [editCustomer, detailTab]);
+  }, [selectedCustomer?.id, detailTab]);
+
+  const openInvoiceForSaleId = useCallback(
+    async (saleId: number) => {
+      if (!selectedCustomer) return;
+      const cached = detailSales.find((sw) => sw.sale.id === saleId) ?? recentSales.find((sw) => sw.sale.id === saleId);
+      let sw = cached ?? null;
+      if (!sw) {
+        sw = await getMarinaApi().getSaleWithLines(saleId);
+      }
+      if (!sw || !canCreateInvoiceForSale(sw.sale)) {
+        window.alert("Bu islem icin fatura olusturulamaz.");
+        return;
+      }
+      setInvoiceCustomer(invoiceInfoFromCustomer(selectedCustomer));
+      setInvoiceSale(sw);
+    },
+    [selectedCustomer, detailSales, recentSales]
+  );
 
   const pickCustomer = (c: Customer) => {
     const next = selection?.type === "customer" && selection.id === c.id ? null : { type: "customer" as const, id: c.id };
@@ -302,26 +358,62 @@ export function CustomersPanel({
     if (updated) onCustomersChange?.();
   };
 
-  const markCustomerDebtPaid = async (customer: Customer) => {
-    if (customer.balanceOwedKurus <= 0) return;
-    const amount = formatTry(customer.balanceOwedKurus);
-    const payLabel = debtPayType === "card" ? "kart" : "nakit";
-    if (
-      !window.confirm(
-        `${customer.name} icin acik borc (${amount}) ${payLabel} olarak tahsil edilsin mi? Tutar bugunun satislari ve gelire yazilir.`
-      )
-    ) {
-      return;
+  useEffect(() => {
+    const balance =
+      selection?.type === "customer"
+        ? (customers.find((c) => c.id === selection.id)?.balanceOwedKurus ?? 0)
+        : selection?.type === "supplier"
+          ? (suppliers.find((s) => s.id === selection.id)?.balanceOwedKurus ?? 0)
+          : 0;
+    if (balance > 0) {
+      setDebtPayAmountTl((balance / 100).toFixed(2));
+    } else {
+      setDebtPayAmountTl("");
     }
+    setDebtPayNote("");
+  }, [selection, customers, suppliers]);
+
+  const markCustomerDebtPaid = async (customer: Customer, amountKurus: number, paymentNote: string) => {
+    if (customer.balanceOwedKurus <= 0) return;
+    const payLabel = debtPayType === "card" ? "kart" : "nakit";
+    const remaining = customer.balanceOwedKurus - amountKurus;
+    const msg =
+      remaining > 0
+        ? `${customer.name}: ${formatTry(amountKurus)} ${payLabel} tahsil edilsin mi? Kalan borc ${formatTry(remaining)} olacak. Tutar bugunun satislari ve gelire yazilir.`
+        : `${customer.name}: ${formatTry(amountKurus)} ${payLabel} olarak tum borc tahsil edilsin mi? Tutar bugunun satislari ve gelire yazilir.`;
+    if (!window.confirm(msg)) return;
     setDebtPaySaving(true);
     try {
-      await getMarinaApi().recordCustomerDebtPayment(customer.id, debtPayType);
+      await getMarinaApi().recordCustomerDebtPayment(customer.id, debtPayType, amountKurus, paymentNote || undefined);
       await onCustomersChange?.();
       if (selection?.type === "customer" && selection.id === customer.id) {
         await loadCustomerDetail(customer.id);
       }
     } catch (e) {
       window.alert(e instanceof Error ? e.message : "Borc tahsilati kaydedilemedi.");
+    } finally {
+      setDebtPaySaving(false);
+    }
+  };
+
+  const markSupplierDebtPaid = async (supplier: Supplier, amountKurus: number, paymentNote: string) => {
+    if (supplier.balanceOwedKurus <= 0) return;
+    const payLabel = debtPayType === "card" ? "kart" : "nakit";
+    const remaining = supplier.balanceOwedKurus - amountKurus;
+    const msg =
+      remaining > 0
+        ? `${supplier.name}: ${formatTry(amountKurus)} ${payLabel} odensin mi? Kalan borc ${formatTry(remaining)} olacak. Tutar bugunun gidere (Mal alimi / stok) yazilir.`
+        : `${supplier.name}: ${formatTry(amountKurus)} ${payLabel} ile tum borc odensin mi? Tutar bugunun gidere (Mal alimi / stok) yazilir.`;
+    if (!window.confirm(msg)) return;
+    setDebtPaySaving(true);
+    try {
+      await getMarinaApi().recordSupplierDebtPayment(supplier.id, debtPayType, amountKurus, paymentNote || undefined);
+      await onSuppliersChange?.();
+      if (selection?.type === "supplier" && selection.id === supplier.id) {
+        await loadSupplierDetail(supplier.id);
+      }
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : "Tedarikci borc odemesi kaydedilemedi.");
     } finally {
       setDebtPaySaving(false);
     }
@@ -757,9 +849,7 @@ export function CustomersPanel({
                   rows={2}
                 />
               </label>
-              <div
-                className={`customer-field-grid${selectedCustomer.balanceOwedKurus > 0 ? " customer-field-grid--with-pay" : ""}`}
-              >
+              <div className="customer-field-grid">
                 <label className="customer-field">
                   <span>Borc (TL)</span>
                   <input
@@ -773,37 +863,6 @@ export function CustomersPanel({
                     }}
                   />
                 </label>
-                {selectedCustomer.balanceOwedKurus > 0 ? (
-                  <div className="customer-debt-paid-cell">
-                    <span className="customer-debt-paid-label">Tahsilat</span>
-                    <div className="customer-debt-pay-type" role="group" aria-label="Odeme tipi">
-                      <button
-                        type="button"
-                        className={debtPayType === "cash" ? "active" : ""}
-                        disabled={debtPaySaving}
-                        onClick={() => setDebtPayType("cash")}
-                      >
-                        Nakit
-                      </button>
-                      <button
-                        type="button"
-                        className={debtPayType === "card" ? "active" : ""}
-                        disabled={debtPaySaving}
-                        onClick={() => setDebtPayType("card")}
-                      >
-                        Kart
-                      </button>
-                    </div>
-                    <button
-                      type="button"
-                      className="cart-debt-panel-paid-btn customer-debt-paid-btn"
-                      disabled={debtPaySaving}
-                      onClick={() => void markCustomerDebtPaid(selectedCustomer)}
-                    >
-                      {debtPaySaving ? "Kaydediliyor..." : "Borc odendi"}
-                    </button>
-                  </div>
-                ) : null}
                 <label className="customer-field">
                   <span>Indirim %</span>
                   <input
@@ -822,9 +881,26 @@ export function CustomersPanel({
                 </label>
               </div>
               {selectedCustomer.balanceOwedKurus > 0 ? (
-                <p className="customer-debt-summary">
-                  Acik borc: <span className="customer-debt-badge customer-debt-badge-lg">{formatTry(selectedCustomer.balanceOwedKurus)}</span>
-                </p>
+                <>
+                  <p className="customer-debt-summary">
+                    Acik borc:{" "}
+                    <span className="customer-debt-badge customer-debt-badge-lg">
+                      {formatTry(selectedCustomer.balanceOwedKurus)}
+                    </span>
+                  </p>
+                  <DebtPaymentPanel
+                    balanceOwedKurus={selectedCustomer.balanceOwedKurus}
+                    amountTl={debtPayAmountTl}
+                    onAmountTlChange={setDebtPayAmountTl}
+                    paymentType={debtPayType}
+                    onPaymentTypeChange={setDebtPayType}
+                    saving={debtPaySaving}
+                    note={debtPayNote}
+                    onNoteChange={setDebtPayNote}
+                    mode="collect"
+                    onPay={(amountKurus, note) => void markCustomerDebtPaid(selectedCustomer, amountKurus, note)}
+                  />
+                </>
               ) : null}
               {customerStats && (
                 <div className="customer-stats-row">
@@ -853,10 +929,26 @@ export function CustomersPanel({
           {detailTab === "info" && selectedSupplier && (
             <div className="customer-detail-card customer-detail-card-flat">
               {selectedSupplier.balanceOwedKurus > 0 ? (
-                <p className="customer-debt-summary">
-                  Tedarikci borcu:{" "}
-                  <span className="supplier-debt-badge supplier-debt-badge-lg">{formatTry(selectedSupplier.balanceOwedKurus)}</span>
-                </p>
+                <>
+                  <p className="customer-debt-summary">
+                    Tedarikci borcu:{" "}
+                    <span className="supplier-debt-badge supplier-debt-badge-lg">
+                      {formatTry(selectedSupplier.balanceOwedKurus)}
+                    </span>
+                  </p>
+                  <DebtPaymentPanel
+                    balanceOwedKurus={selectedSupplier.balanceOwedKurus}
+                    amountTl={debtPayAmountTl}
+                    onAmountTlChange={setDebtPayAmountTl}
+                    paymentType={debtPayType}
+                    onPaymentTypeChange={setDebtPayType}
+                    saving={debtPaySaving}
+                    note={debtPayNote}
+                    onNoteChange={setDebtPayNote}
+                    mode="pay"
+                    onPay={(amountKurus, note) => void markSupplierDebtPaid(selectedSupplier, amountKurus, note)}
+                  />
+                </>
               ) : (
                 <p className="muted small">Acik tedarikci borcu yok.</p>
               )}
@@ -962,6 +1054,7 @@ export function CustomersPanel({
                       <th>Toplam miktar</th>
                       <th>Ciro</th>
                       <th>Son alis</th>
+                      <th className="customer-history-invoice-col" />
                     </tr>
                   </thead>
                   <tbody>
@@ -973,6 +1066,20 @@ export function CustomersPanel({
                         <td>{formatQtyShort(r.totalQty, r.saleUnit)}</td>
                         <td>{formatTry(r.totalRevenueKurus)}</td>
                         <td>{r.lastPurchaseAt ? formatSaleTime(r.lastPurchaseAt) : "—"}</td>
+                        <td className="customer-history-invoice-col">
+                          {r.lastSaleId != null ? (
+                            <button
+                              type="button"
+                              className="invoice-btn customer-history-invoice-btn"
+                              title="Son alistaki satis icin fatura"
+                              onClick={() => void openInvoiceForSaleId(r.lastSaleId!)}
+                            >
+                              Fatura olustur
+                            </button>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -1012,20 +1119,40 @@ export function CustomersPanel({
                 </>
               ) : null}
               <h4>Son islemler</h4>
+              {detailSalesLoading ? <p className="muted small">Islemler yukleniyor...</p> : null}
               <ul className="customer-recent-list">
-                {recentSales.map((sw) => (
-                  <li key={sw.sale.id}>
+                {(detailSales.length > 0 ? detailSales : recentSales).map((sw) => (
+                  <li key={sw.sale.id} className="customer-recent-item">
                     <button type="button" className="customer-recent-btn" onClick={() => onOpenSaleDetail(sw.sale.id)}>
                       <span>
                         #{sw.sale.id} · {formatSaleTime(sw.sale.createdAt)}
+                        {sw.sale.kind === "debt_payment" ? (
+                          <span className="muted small"> · Borc tahsilati</span>
+                        ) : null}
                         {(sw.sale.debtAddedKurus ?? 0) > 0 ? (
                           <span className="customer-debt-badge customer-debt-badge-inline">
                             +borc {formatTry(sw.sale.debtAddedKurus!)}
                           </span>
                         ) : null}
+                        {sw.sale.paymentNote?.trim() ? (
+                          <span className="customer-sale-note-preview"> · {sw.sale.paymentNote.trim()}</span>
+                        ) : null}
                       </span>
-                      <span>{formatTry(sw.sale.subtotalKurus)}</span>
+                      <span>
+                        {formatTry(
+                          sw.sale.kind === "debt_payment" ? (sw.sale.debtPaidKurus ?? sw.sale.paidAmountKurus) : sw.sale.subtotalKurus
+                        )}
+                      </span>
                     </button>
+                    {canCreateInvoiceForSale(sw.sale) ? (
+                      <button
+                        type="button"
+                        className="invoice-btn customer-recent-invoice-btn"
+                        onClick={() => void openInvoiceForSaleId(sw.sale.id)}
+                      >
+                        Fatura
+                      </button>
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -1057,46 +1184,22 @@ export function CustomersPanel({
                   </tbody>
                 </table>
               )}
+              {supplierInventoryTotals ? (
+                <StockInventorySummary
+                  totals={supplierInventoryTotals}
+                  countLabel="Bu tedarikciden urun (satir)"
+                  ariaLabel="Tedarikci stok ozeti"
+                />
+              ) : null}
               <h4>Stok giris gecmisi</h4>
-              <p className="muted small">Tedarikciden gelen her stok girisi: urun, miktar, birim gelis ve toplam maliyet.</p>
-              {supplierOverview.stockEntries.length === 0 ? (
-                <p className="muted small">Stok girisi yok.</p>
-              ) : (
-                <table className="cashflow-table">
-                  <thead>
-                    <tr>
-                      <th>Tarih</th>
-                      <th>Urun</th>
-                      <th>Miktar</th>
-                      <th>Birim gelis</th>
-                      <th>Toplam</th>
-                      <th>Not</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {supplierOverview.stockEntries.slice(0, 100).map((e) => (
-                      <tr key={e.movementId}>
-                        <td>{formatSaleTime(e.createdAt)}</td>
-                        <td>
-                          <span className="closure-code">{e.productCode}</span> {e.productName}
-                        </td>
-                        <td>{formatQtyShort(e.qty, e.saleUnit ?? "piece")}</td>
-                        <td>{stockEntryUnitCostLabel(e)}</td>
-                        <td>
-                          {e.lineCostKurus != null && e.lineCostKurus > 0 ? formatTry(e.lineCostKurus) : "—"}
-                          {(e.debtAddedKurus ?? 0) > 0 ? (
-                            <span className="supplier-debt-badge supplier-debt-badge-inline" title="Kalan borc">
-                              {" "}
-                              borc {formatTry(e.debtAddedKurus!)}
-                            </span>
-                          ) : null}
-                        </td>
-                        <td>{e.note || "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
+              <p className="muted small">
+                Tek fatura / sepet kayitlari gruplanir; satira tiklayarak kalemleri gorun.
+              </p>
+              <SupplierStockBatchHistory
+                entries={supplierOverview.stockEntries.slice(0, 100)}
+                formatTime={formatSaleTime}
+                unitCostLabel={stockEntryUnitCostLabel}
+              />
             </div>
           )}
         </div>
@@ -1416,6 +1519,15 @@ export function CustomersPanel({
           </div>
         </div>
       )}
+
+      {invoiceSale ? (
+        <SaleInvoiceModal
+          sale={invoiceSale}
+          customer={invoiceCustomer}
+          onCustomerChange={setInvoiceCustomer}
+          onClose={() => setInvoiceSale(null)}
+        />
+      ) : null}
     </div>
   );
 }

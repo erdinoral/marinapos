@@ -153,6 +153,7 @@ export class CustomerRepository {
         totalRevenueKurus: number;
         transactionCount: number;
         lastPurchaseAt: string | null;
+        lastSaleId: number | null;
       }
     >();
     for (const item of state.saleItems) {
@@ -171,14 +172,18 @@ export class CustomerRepository {
           totalQty: 0,
           totalRevenueKurus: 0,
           transactionCount: 0,
-          lastPurchaseAt: null
+          lastPurchaseAt: null,
+          lastSaleId: null
         };
       }
       row.totalQty += item.qty * sign;
       row.totalRevenueKurus += item.lineTotalKurus * sign;
       if (sign > 0) {
         row.transactionCount += 1;
-        if (!row.lastPurchaseAt || sale.createdAt > row.lastPurchaseAt) row.lastPurchaseAt = sale.createdAt;
+        if (!row.lastPurchaseAt || sale.createdAt > row.lastPurchaseAt) {
+          row.lastPurchaseAt = sale.createdAt;
+          row.lastSaleId = sale.id;
+        }
       }
       acc.set(item.productId, row);
     }

@@ -1,4 +1,4 @@
-import type { CategorySaleUnit, StockCostMode } from "../types/models";
+import type { CategorySaleUnit, StockCostMode, StockEntryLogRow } from "../types/models";
 import { gramLineTotalKurus, kurusPerGramToTlPer1000g } from "./saleUnit";
 
 export function lineCostKurusFromUnit(unitCostKurus: number, qty: number, saleUnit: CategorySaleUnit): number {
@@ -54,6 +54,30 @@ export function computeStockAddCosts(input: {
 
 export function stockCostModeLabel(mode: StockCostMode): string {
   return mode === "invoice" ? "Odenen fatura" : "Urun bazli";
+}
+
+/** Tedarikci stok gecmisi: fatura tutari veya urun gelis fiyatindan satir tutari (kurus) */
+export function stockEntryDisplayAmountKurus(
+  entry: Pick<
+    StockEntryLogRow,
+    "lineCostKurus" | "catalogLineCostKurus" | "invoicePaidKurus" | "unitCostKurus" | "qty" | "costMode" | "saleUnit"
+  >
+): number {
+  const saleUnit = entry.saleUnit ?? "piece";
+  if (entry.costMode === "invoice") {
+    const inv = Math.max(0, Math.round(Number(entry.invoicePaidKurus ?? 0)));
+    if (inv > 0) return inv;
+    const line = Math.max(0, Math.round(Number(entry.lineCostKurus ?? 0)));
+    if (line > 0) return line;
+  }
+  const line = Math.max(0, Math.round(Number(entry.lineCostKurus ?? 0)));
+  if (line > 0) return line;
+  const catalog = Math.max(0, Math.round(Number(entry.catalogLineCostKurus ?? 0)));
+  if (catalog > 0) return catalog;
+  const unit = Math.max(0, Math.round(Number(entry.unitCostKurus ?? 0)));
+  const q = Math.max(0, Math.round(entry.qty));
+  if (unit > 0 && q > 0) return lineCostKurusFromUnit(unit, q, saleUnit);
+  return 0;
 }
 
 /** Stok girisi kaydindan birim gelis (kurus); eski kayitlarda yalnizca satir toplami olabilir */

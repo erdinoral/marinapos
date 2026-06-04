@@ -170,7 +170,7 @@ export function AccountProfileFeedbackTab({ user, companyName, feedbackConfigure
               Soru, hata bildirimi veya onerinizi buradan gonderin; hesabiniza baglanir.
             </p>
           </div>
-          <button type="button" className="account-profile-toggle-btn" onClick={() => setFormOpen((v) => !v)}>
+          <button type="button" className="app-btn-secondary" onClick={() => setFormOpen((v) => !v)}>
             {formOpen ? "Formu gizle" : "Yeni mesaj"}
           </button>
         </div>
@@ -219,11 +219,11 @@ export function AccountProfileFeedbackTab({ user, companyName, feedbackConfigure
         {msg ? <p className={`account-auth-message${msgOk ? " account-auth-message--ok" : ""}`}>{msg}</p> : null}
       </section>
 
-      <p className="muted small account-profile-history-hint">
-        <button type="button" className="account-profile-toggle-btn" onClick={toggleHistory}>
+      <div className="account-profile-history-toggle">
+        <button type="button" className="app-btn-secondary" onClick={toggleHistory}>
           {showHistory ? "Gonderdiginiz mesajlari gizle" : "Gonderdiginiz mesajlari goster"}
         </button>
-      </p>
+      </div>
       {showHistory ? (
         <section className="account-panel-card account-profile-card">
           <div className="account-profile-section-head">
@@ -233,7 +233,7 @@ export function AccountProfileFeedbackTab({ user, companyName, feedbackConfigure
                 Durum ve Akiyom yaniti. Panel guncelledikten sonra yenileyin.
               </p>
             </div>
-            <button type="button" className="account-profile-toggle-btn" disabled={loading} onClick={() => void loadReplies()}>
+            <button type="button" className="app-btn-secondary" disabled={loading} onClick={() => void loadReplies()}>
               {loading ? "Yukleniyor…" : "Yenile"}
             </button>
           </div>

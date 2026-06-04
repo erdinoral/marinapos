@@ -59,6 +59,31 @@ export function formatLowStockRemainLabel(product: Pick<Product, "stockQty" | "c
   return `${formatQtyShort(product.stockQty, unit)} kaldi`;
 }
 
+export type ProductStockBadgeLevel = "ok" | "low" | "empty";
+
+/** Urun karti stok etiketi: yesil / sari (10 adet veya 1000 g alti) / kirmizi (stok yok) */
+export function productStockBadgeLevel(
+  product: Pick<Product, "stockQty" | "categoryId">,
+  categories: Category[],
+  lowStockThreshold = 10
+): ProductStockBadgeLevel {
+  const unit = categorySaleUnitOf(categories, product.categoryId);
+  const qty = unit === "gram" ? Math.max(0, Math.round(product.stockQty)) : product.stockQty;
+  if (qty <= 0) return "empty";
+  if (unit === "gram") {
+    const limit = lowStockQtyLimit(categories, product.categoryId, lowStockThreshold);
+    return qty < limit ? "low" : "ok";
+  }
+  return qty <= 10 ? "low" : "ok";
+}
+
+export function productStockBadgeLabel(
+  product: Pick<Product, "stockQty" | "categoryId">,
+  categories: Category[]
+): string {
+  return formatQtyShort(product.stockQty, categorySaleUnitOf(categories, product.categoryId));
+}
+
 export function pricePlaceholder(unit: CategorySaleUnit): string {
   return unit === "gram" ? "Satis fiyati (TL / 1000 g)" : "Satis fiyati (TL / adet)";
 }

@@ -260,7 +260,12 @@ export class SalesRepository {
   }
 
   /** Musteri borc tahsilati: gelir / bugunun satislari / kasa ozetine yansir. */
-  recordDebtPayment(customerId: number, paymentType: PaymentType, amountKurus?: number): SaleRecord {
+  recordDebtPayment(
+    customerId: number,
+    paymentType: PaymentType,
+    amountKurus?: number,
+    paymentNote?: string
+  ): SaleRecord {
     const state = this.store.getState();
     const cid = Math.floor(Number(customerId));
     if (!Number.isFinite(cid) || cid <= 0) throw new Error("Musteri secilmelidir.");
@@ -277,6 +282,7 @@ export class SalesRepository {
     customer.balanceOwedKurus = balance - pay;
     state.sequences.saleId += 1;
     const saleId = state.sequences.saleId;
+    const noteTrim = String(paymentNote ?? "").trim();
     const row: SaleRecord = {
       id: saleId,
       createdAt: new Date().toISOString(),
@@ -287,7 +293,8 @@ export class SalesRepository {
       paidAmountKurus: pay,
       changeAmountKurus: 0,
       debtPaidKurus: pay,
-      customerId: cid
+      customerId: cid,
+      ...(noteTrim ? { paymentNote: noteTrim } : {})
     };
     state.sales.push(row);
     this.store.save();

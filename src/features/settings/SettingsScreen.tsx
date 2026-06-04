@@ -6,6 +6,7 @@ import { BackupFileInfo, BackupInspectResult, ErrorLogEntry, Settings } from "..
 import { BackupScopeModal } from "./BackupScopeModal";
 import { AppUpdateSection } from "./AppUpdateSection";
 import { FeedbackSection } from "./FeedbackSection";
+import { DEFAULT_APP_TITLE } from "../../app/BrandTitle";
 
 function fmtDate(iso: string) {
   const d = new Date(iso);
@@ -22,7 +23,11 @@ type ScopeModalState =
   | { mode: "backup" }
   | { mode: "restore"; inspect: BackupInspectResult; backupName?: string; jsonText?: string };
 
-export function SettingsScreen() {
+type Props = {
+  onSettingsChange?: () => void | Promise<void>;
+};
+
+export function SettingsScreen({ onSettingsChange }: Props) {
   const [backups, setBackups] = useState<BackupFileInfo[]>([]);
   const [logs, setLogs] = useState<ErrorLogEntry[]>([]);
   const [logsOpen, setLogsOpen] = useState(false);
@@ -31,6 +36,8 @@ export function SettingsScreen() {
   const [scopeModal, setScopeModal] = useState<ScopeModalState | null>(null);
   const [backupsOpen, setBackupsOpen] = useState(false);
   const restoreFileRef = useRef<HTMLInputElement | null>(null);
+  const [appTitle, setAppTitle] = useState(DEFAULT_APP_TITLE);
+  const [appTitleSaving, setAppTitleSaving] = useState(false);
   const [company, setCompany] = useState<Pick<Settings, "companyName" | "companyAddress" | "companyPhone" | "companyEmail" | "taxOffice" | "taxNumber">>({
     companyName: "",
     companyAddress: "",
@@ -46,6 +53,7 @@ export function SettingsScreen() {
       const [b, l, s] = await Promise.all([api.listBackups(), api.listLogs(120), api.getSettings()]);
       setBackups(b);
       setLogs(l);
+      setAppTitle(s.appTitle?.trim() || DEFAULT_APP_TITLE);
       setCompany({
         companyName: s.companyName ?? "",
         companyAddress: s.companyAddress ?? "",
@@ -134,6 +142,22 @@ export function SettingsScreen() {
     }
   };
 
+  const saveAppTitle = async () => {
+    const next = appTitle.trim() || DEFAULT_APP_TITLE;
+    setAppTitleSaving(true);
+    setMsg("");
+    try {
+      await getMarinaApi().setCompanyInfo({ appTitle: next });
+      setAppTitle(next);
+      setMsg("Uygulama basligi kaydedildi.");
+      await onSettingsChange?.();
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Baslik kaydedilemedi.");
+    } finally {
+      setAppTitleSaving(false);
+    }
+  };
+
   const clearLogs = async () => {
     if (!window.confirm("Tum hata loglari temizlensin mi?")) return;
     await getMarinaApi().clearLogs();
@@ -144,6 +168,29 @@ export function SettingsScreen() {
     <motion.div className="settings-screen" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
       <h2>Ayarlar</h2>
       {msg && <p className="form-message">{msg}</p>}
+
+      <section className="settings-card">
+        <div className="settings-card-head">
+          <h3>Uygulama basligi</h3>
+        </div>
+        <p className="settings-empty settings-backup-hint">
+          Ust menude logo yaninda gorunen isim. Ornek: isletme adiniz veya &quot;ABC Nargile POS&quot;.
+        </p>
+        <label className="settings-field">
+          <span>Baslik metni</span>
+          <input
+            type="text"
+            value={appTitle}
+            maxLength={80}
+            disabled={appTitleSaving}
+            onChange={(e) => setAppTitle(e.target.value)}
+            placeholder={DEFAULT_APP_TITLE}
+          />
+        </label>
+        <button type="button" className="settings-save-title-btn" disabled={appTitleSaving} onClick={() => void saveAppTitle()}>
+          {appTitleSaving ? "Kaydediliyor..." : "Basligi kaydet"}
+        </button>
+      </section>
 
       <p className="settings-account-hint muted small">
         Firma unvani ve fatura bilgileri icin ust menuden <strong>Hesap</strong> → <strong>Firma</strong> sekmesine gidin.

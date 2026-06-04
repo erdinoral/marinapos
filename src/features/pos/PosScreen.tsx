@@ -18,16 +18,17 @@ import {
   TopSellingProduct
 } from "../../types/models";
 import { formatTry, formatTlTable, formatTlWhole, parseTrAmount, parseTrAmountWhole, parseTlDecimal, tlToKurus } from "../../utils/currency";
+import { SaleInvoiceModal } from "../invoice/SaleInvoiceModal";
 import { invoiceInfoFromCustomer } from "../../utils/invoiceFromCustomer";
+import { canCreateInvoiceForSale } from "../../utils/invoiceFromSale";
+import { isEditableKeyboardTarget } from "../../utils/isEditableTarget";
 import { saleCollectedKurus, saleKindListLabel } from "../../utils/saleCollected";
 import {
   categorySaleUnitOf,
   defaultGramQtyForCart,
-  formatLowStockRemainLabel,
   formatQtyShort,
   gramsFromLineTotalTl,
   gramPriceKurusMigrate,
-  isProductLowStock,
   kurusPerGramToTlPer1000g,
   normalizeGramQty,
   tlPer1000gToKurusPerGram,
@@ -56,6 +57,7 @@ import {
   salePaymentSurplusKurus
 } from "../../utils/customerDebtPayment";
 import { PosCartCustomerSelect } from "./PosCartCustomerSelect";
+import { ProductStockBadge } from "./ProductStockBadge";
 import { CustomersPanel } from "../customers/CustomersPanel";
 import { ReceiveStockModal } from "../stock/ReceiveStockModal";
 import { StockAdjustModal } from "../stock/StockAdjustModal";
@@ -444,6 +446,7 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
   const [invoicePreviewHtml, setInvoicePreviewHtml] = useState("");
   const [invoiceLoading, setInvoiceLoading] = useState(false);
   const [detailOpen, setDetailOpen] = useState<SaleWithLines | null>(null);
+  const [saleInvoiceOpen, setSaleInvoiceOpen] = useState<SaleWithLines | null>(null);
   const [invoiceCustomer, setInvoiceCustomer] = useState<InvoiceCustomerInfo>({
     fullName: "",
     companyName: "",
@@ -1639,6 +1642,27 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
     void openSaleDetail(saleId);
   };
 
+  const openInvoiceFromSaleDetail = () => {
+    if (!detailOpen || !canCreateInvoiceForSale(detailOpen.sale)) return;
+    const cid = detailOpen.sale.customerId;
+    const c = cid ? customers.find((x) => x.id === cid) : null;
+    setInvoiceCustomer(
+      c
+        ? invoiceInfoFromCustomer(c)
+        : {
+            fullName: "",
+            companyName: "",
+            tcOrVkn: "",
+            phone: "",
+            email: "",
+            address: "",
+            city: "",
+            district: ""
+          }
+    );
+    setSaleInvoiceOpen(detailOpen);
+  };
+
   const applyReturnFromDetail = async () => {
     if (!detailOpen || detailOpen.sale.kind !== "sale") return;
     if (cart.length > 0 && !window.confirm("Sepetteki urunler silinsin ve bu satis iade sepetine alinsin mi?")) {
@@ -1686,8 +1710,8 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
     let resetTimer: ReturnType<typeof setTimeout> | null = null;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.ctrlKey || event.altKey || event.metaKey) return;
-      const t = event.target as HTMLElement | null;
-      if (t?.closest("input, textarea, select, [contenteditable='true']")) {
+      const focusTarget = document.activeElement ?? event.target;
+      if (isEditableKeyboardTarget(focusTarget) || isEditableKeyboardTarget(event.target)) {
         return;
       }
       const now = Date.now();
@@ -1803,11 +1827,12 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
                     <div className="favorite-sale-row">
                       {favoriteSaleProducts.map((product) => (
                         <button key={product.id} type="button" className="favorite-sale-card" onClick={() => addToCart(product, cartAddPriceSource)}>
-                          {isProductLowStock(product, categories, lowStockThreshold) ? (
-                            <span className="favorite-sale-low-badge" title="Eksik stok">
-                              {formatLowStockRemainLabel(product, categories)}
-                            </span>
-                          ) : null}
+                          <ProductStockBadge
+                            product={product}
+                            categories={categories}
+                            lowStockThreshold={lowStockThreshold}
+                            className="favorite-sale-stock-badge"
+                          />
                           <span className="favorite-sale-name">{product.name}</span>
                           <span className="favorite-sale-amt">
                             {formatPosUnitPrice(
@@ -1852,6 +1877,12 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
                             className="favorite-sale-card"
                             onClick={() => addToCart(row.product, cartAddPriceSource)}
                           >
+                            <ProductStockBadge
+                              product={row.product}
+                              categories={categories}
+                              lowStockThreshold={lowStockThreshold}
+                              className="favorite-sale-stock-badge"
+                            />
                             <span className="favorite-sale-name">{row.product.name}</span>
                             <span className="favorite-sale-amt">
                               {formatPosUnitPrice(
@@ -1898,15 +1929,11 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
                           <small className="price-tag-vat">{vatLabel(product)}</small>
                         </div>
                         <div className="image-placeholder">
-                          {saleUnitFor(categories, product) === "piece" && product.stockQty <= 0 ? (
-                            <span className="product-zero-stock-badge" title="Stok yok; satista onay istenir">
-                              Stok yok
-                            </span>
-                          ) : isProductLowStock(product, categories, lowStockThreshold) ? (
-                            <span className="product-low-stock-badge" title="Eksik stok listesinde">
-                              {formatLowStockRemainLabel(product, categories)}
-                            </span>
-                          ) : null}
+                          <ProductStockBadge
+                            product={product}
+                            categories={categories}
+                            lowStockThreshold={lowStockThreshold}
+                          />
                           {(() => {
                             const path = product.imagePath.trim();
                             const cached = imageSrcMap[path];
@@ -2127,24 +2154,34 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
                       </div>
                     ) : (
                       <div className="cart-piece-body">
-                        <div className="cart-inline-fields">
+                        <div className="cart-inline-fields cart-inline-fields--piece">
                           <div className="cart-field cart-field-qty">
                             <span className="cart-field-label">Adet</span>
-                            <div className="cart-qty-stepper">
-                              <button type="button" onClick={() => changeQty(item.id, item.priceSource, -1)}>
-                                -
-                              </button>
-                              <input
-                                type="number"
-                                className="cart-field-input cart-qty-input"
-                                min={1}
-                                step={1}
-                                value={item.qty}
-                                onChange={(e) => setPieceQtyFromInput(item.id, item.priceSource, Number(e.target.value))}
-                              />
-                              <button type="button" onClick={() => changeQty(item.id, item.priceSource, 1)}>
-                                +
-                              </button>
+                            <div className="cart-qty-row">
+                              <div className="cart-qty-stepper">
+                                <button type="button" onClick={() => changeQty(item.id, item.priceSource, -1)}>
+                                  -
+                                </button>
+                                <input
+                                  type="number"
+                                  className="cart-field-input cart-qty-input"
+                                  min={1}
+                                  step={1}
+                                  value={item.qty}
+                                  onChange={(e) => setPieceQtyFromInput(item.id, item.priceSource, Number(e.target.value))}
+                                />
+                                <button type="button" onClick={() => changeQty(item.id, item.priceSource, 1)}>
+                                  +
+                                </button>
+                              </div>
+                              <div className="cart-qty-bump" aria-label="Adet hizli artir">
+                                <button type="button" onClick={() => changeQty(item.id, item.priceSource, 5)}>
+                                  +5
+                                </button>
+                                <button type="button" className="cart-qty-bump-10" onClick={() => changeQty(item.id, item.priceSource, 10)}>
+                                  +10
+                                </button>
+                              </div>
                             </div>
                           </div>
                           <CartUnitPriceField
@@ -2581,6 +2618,7 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
                   {sale.kind === "debt_payment" && sale.customerId
                     ? ` · ${customers.find((c) => c.id === sale.customerId)?.name ?? `Musteri #${sale.customerId}`}`
                     : null}
+                  {sale.paymentNote?.trim() ? ` · ${sale.paymentNote.trim()}` : null}
                 </span>
                 <span className="sales-amount">{formatTry(saleCollectedKurus(sale))}</span>
               </button>
@@ -2944,6 +2982,15 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
         </div>
       )}
 
+      {saleInvoiceOpen ? (
+        <SaleInvoiceModal
+          sale={saleInvoiceOpen}
+          customer={invoiceCustomer}
+          onCustomerChange={setInvoiceCustomer}
+          onClose={() => setSaleInvoiceOpen(null)}
+        />
+      ) : null}
+
       {detailOpen && (
         <div className="settings-log-overlay" onClick={() => setDetailOpen(null)} role="dialog" aria-modal="true">
           <div className="settings-log-dialog sale-detail-dialog" onClick={(e) => e.stopPropagation()}>
@@ -2966,10 +3013,15 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
               ) : null}
             </p>
             {detailOpen.sale.kind === "debt_payment" ? (
-              <p className="sale-detail-meta">
-                Musteri borcu tahsilati — kasaya giren:{" "}
-                <strong className="sales-amount">{formatTry(saleCollectedKurus(detailOpen.sale))}</strong>
-              </p>
+              <>
+                <p className="sale-detail-meta">
+                  Musteri borcu tahsilati — kasaya giren:{" "}
+                  <strong className="sales-amount">{formatTry(saleCollectedKurus(detailOpen.sale))}</strong>
+                </p>
+                {detailOpen.sale.paymentNote?.trim() ? (
+                  <p className="sale-detail-meta muted small">Not: {detailOpen.sale.paymentNote.trim()}</p>
+                ) : null}
+              </>
             ) : (
               <div className="sale-detail-table-wrap">
                 <table className="sale-detail-table">
@@ -3025,6 +3077,11 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
               ) : null}
             </p>
             <div className="sale-detail-actions">
+              {canCreateInvoiceForSale(detailOpen.sale) ? (
+                <button type="button" className="invoice-btn" onClick={() => openInvoiceFromSaleDetail()}>
+                  Fatura olustur
+                </button>
+              ) : null}
               {detailOpen.sale.kind === "sale" ? (
                 <button type="button" className="sale-detail-return-btn" onClick={() => void applyReturnFromDetail()}>
                   Iade icin sepete al (Satis sekmesi)
@@ -3087,9 +3144,10 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
       ) : null}
       {posReceiveProduct ? (
         <ReceiveStockModal
-          product={products.find((p) => p.id === posReceiveProduct.id) ?? posReceiveProduct}
+          products={products}
           categories={categories}
           suppliers={suppliers}
+          initialProduct={products.find((p) => p.id === posReceiveProduct.id) ?? posReceiveProduct}
           onClose={() => setPosReceiveProduct(null)}
           onSaved={refreshPosCatalog}
         />

@@ -183,7 +183,7 @@ export function FeedbackSection({ companyName = "" }: Props) {
       <div className="settings-card-head">
         <h3>Soru, gorus, oneri</h3>
         <div className="settings-card-actions">
-          <button type="button" className="primary" disabled={sending || configured === false} onClick={() => void submit()}>
+          <button type="button" className="primary app-btn-primary" disabled={sending || configured === false} onClick={() => void submit()}>
             {sending ? "Gonderiliyor..." : "Gonder"}
           </button>
         </div>
@@ -236,11 +236,11 @@ export function FeedbackSection({ companyName = "" }: Props) {
             </div>
           </div>
 
-          <p className="muted small settings-feedback-history-hint">
-            <button type="button" className="settings-feedback-refresh" onClick={toggleHistory}>
+          <div className="settings-feedback-history-toggle">
+            <button type="button" className="app-btn-secondary" onClick={toggleHistory}>
               {showHistory ? "Gonderdiginiz mesajlari gizle" : "Gonderdiginiz mesajlari goster"}
             </button>
-          </p>
+          </div>
           {showHistory ? (
             <div className="settings-feedback-replies">
               <div className="settings-feedback-replies-head">
@@ -251,7 +251,7 @@ export function FeedbackSection({ companyName = "" }: Props) {
                     basin.
                   </p>
                 </div>
-                <button type="button" className="settings-feedback-refresh" disabled={loadingReplies} onClick={() => void loadReplies()}>
+                <button type="button" className="app-btn-secondary" disabled={loadingReplies} onClick={() => void loadReplies()}>
                   {loadingReplies ? "Yukleniyor..." : "Yenile"}
                 </button>
               </div>

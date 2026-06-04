@@ -61,7 +61,7 @@ function createWindow() {
   const iconPath = isDev
     ? path.join(process.cwd(), "build", "icons", "icon.png")
     : path.join(app.getAppPath(), "build", "icons", "icon.png");
-  const mainWindow = new BrowserWindow({
+  const win = new BrowserWindow({
     width: 1500,
     height: 900,
     minWidth: 960,
@@ -72,9 +72,19 @@ function createWindow() {
       contextIsolation: true
     }
   });
-  mainWindow.maximize();
+  win.maximize();
 
-  mainWindow.on("close", () => {
+  /** Windows: baska uygulamadan donunce klavye bazen webview'e gitmez; alta alip acinca duzelir. */
+  const refocusWebContents = () => {
+    if (!win.isDestroyed() && win.isFocused()) {
+      win.webContents.focus();
+    }
+  };
+  win.on("focus", refocusWebContents);
+  win.on("show", refocusWebContents);
+  win.webContents.on("did-finish-load", refocusWebContents);
+
+  win.on("close", () => {
     try {
       closureService.runClosureForToday();
     } catch {
@@ -83,9 +93,9 @@ function createWindow() {
   });
 
   if (isDev) {
-    mainWindow.loadURL("http://localhost:5173");
+    win.loadURL("http://localhost:5173");
   } else {
-    mainWindow.loadFile(path.join(app.getAppPath(), "dist", "index.html"));
+    win.loadFile(path.join(app.getAppPath(), "dist", "index.html"));
   }
 }
 
@@ -199,6 +209,7 @@ ipcMain.handle("categories:delete", (_, categoryId: number) => database.products
 ipcMain.handle("products:add-stock", (_, productId: number, quantity: number, input: StockAddInput) =>
   database.products.addStock(productId, quantity, input ?? { supplierId: 0, costMode: "product" })
 );
+ipcMain.handle("products:next-receive-batch-id", () => database.products.nextReceiveBatchId());
 ipcMain.handle("products:adjust-stock", (_, productId: number, countedQty: number, note = "") =>
   database.products.adjustStock(productId, countedQty, note)
 );
@@ -272,11 +283,12 @@ ipcMain.handle(
 );
 ipcMain.handle(
   "sales:record-debt-payment",
-  (_, customerId: number, paymentType: PaymentType, amountKurus?: number | null) =>
+  (_, customerId: number, paymentType: PaymentType, amountKurus?: number | null, paymentNote?: string | null) =>
     database.sales.recordDebtPayment(
       Number(customerId),
       paymentType,
-      amountKurus != null && Number.isFinite(Number(amountKurus)) ? Number(amountKurus) : undefined
+      amountKurus != null && Number.isFinite(Number(amountKurus)) ? Number(amountKurus) : undefined,
+      paymentNote != null ? String(paymentNote) : undefined
     )
 );
 ipcMain.handle("customers:list", () => database.customers.list());
@@ -302,6 +314,17 @@ ipcMain.handle("customers:set-product-price", (_, customerId: number, productId:
 });
 ipcMain.handle("suppliers:overview", (_, supplierId: number) =>
   database.products.getSupplierOverview(Number(supplierId))
+);
+ipcMain.handle(
+  "suppliers:record-debt-payment",
+  (_, supplierId: number, paymentType: PaymentType, amountKurus?: number | null, paymentNote?: string | null) => {
+    database.products.recordSupplierDebtPayment(
+      Number(supplierId),
+      paymentType,
+      amountKurus != null && Number.isFinite(Number(amountKurus)) ? Number(amountKurus) : undefined,
+      paymentNote != null ? String(paymentNote) : undefined
+    );
+  }
 );
 ipcMain.handle("sales:daily", (_, date: string) => database.sales.getByDate(date));
 ipcMain.handle("sales:daily-product-ids", (_, date: string) => database.sales.getProductIdsBySaleForDate(date));

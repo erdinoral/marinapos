@@ -101,7 +101,7 @@ export function AppUpdateSection() {
       <div className="settings-card-head">
         <h3>Guncelleme</h3>
         <div className="settings-card-actions">
-          <button type="button" disabled={!canCheck} onClick={() => void check()}>
+          <button type="button" className="app-btn-secondary" disabled={!canCheck} onClick={() => void check()}>
             {busy && info?.phase === "checking" ? "Kontrol..." : "Guncellemeleri kontrol et"}
           </button>
         </div>
@@ -131,17 +131,18 @@ export function AppUpdateSection() {
       ) : null}
       <div className="settings-update-actions">
         {canDownload ? (
-          <button type="button" className="primary" disabled={busy} onClick={() => void download()}>
+          <button type="button" className="primary app-btn-primary" disabled={busy} onClick={() => void download()}>
             Guncellemeyi indir
           </button>
         ) : null}
         {canInstall ? (
-          <button type="button" className="primary" disabled={busy} onClick={install}>
+          <button type="button" className="primary app-btn-primary" disabled={busy} onClick={install}>
             Yeniden baslat ve kur
           </button>
         ) : null}
         <button
           type="button"
+          className="app-btn-secondary"
           disabled={busy}
           onClick={() => void getMarinaApi().openExternalUrl(info?.releasePageUrl ?? githubReleasesPageUrl())}
         >

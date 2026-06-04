@@ -46,6 +46,7 @@ export interface Sale {
   debtAddedKurus?: number;
   debtPaidKurus?: number;
   customerId?: number;
+  paymentNote?: string;
 }
 
 export interface StockMovement {
@@ -68,6 +69,8 @@ export interface StockMovement {
   amountPaidKurus?: number;
   debtAddedKurus?: number;
   cashflowEntryId?: number;
+  /** Ayni modal sepetinden kaydedilen satirlar (tedarikci fatura grubu) */
+  receiveBatchId?: string;
 }
 
 export interface Closure {
@@ -112,6 +115,7 @@ export interface MarinaStore {
     tobaccoAromaId: number;
     cashflowEntryId: number;
     stockCostLayerId: number;
+    stockReceiveBatchId: number;
   };
 }
 
@@ -143,6 +147,7 @@ export class JsonStore {
           lowStockThreshold: 10,
           openingCashKurus: 0,
           openingCashDate: "",
+          appTitle: "Marina Nargile Otomasyon",
           companyName: "Marina Nargile Hookah World",
           companyAddress: "",
           companyPhone: "",
@@ -167,7 +172,8 @@ export class JsonStore {
           supplierId: 0,
           tobaccoAromaId: 0,
           cashflowEntryId: 0,
-          stockCostLayerId: 0
+          stockCostLayerId: 0,
+          stockReceiveBatchId: 0
         }
       };
     }
@@ -394,6 +400,9 @@ export class JsonStore {
             : {}),
           ...(row.cashflowEntryId != null && Number(row.cashflowEntryId) > 0
             ? { cashflowEntryId: Math.floor(Number(row.cashflowEntryId)) }
+            : {}),
+          ...(typeof row.receiveBatchId === "string" && row.receiveBatchId.trim()
+            ? { receiveBatchId: row.receiveBatchId.trim() }
             : {})
         } as StockMovement;
       }),
@@ -417,6 +426,7 @@ export class JsonStore {
         lowStockThreshold: parsed.settings?.lowStockThreshold ?? 10,
         openingCashKurus: parsed.settings?.openingCashKurus ?? 0,
         openingCashDate: parsed.settings?.openingCashDate ?? "",
+        appTitle: String(parsed.settings?.appTitle ?? "").trim() || "Marina Nargile Otomasyon",
         companyName: parsed.settings?.companyName ?? "Marina Nargile Hookah World",
         companyAddress: parsed.settings?.companyAddress ?? "",
         companyPhone: parsed.settings?.companyPhone ?? "",
@@ -441,7 +451,8 @@ export class JsonStore {
         supplierId: Math.max(parsed.sequences?.supplierId ?? 0, maxSupplierId),
         tobaccoAromaId: Math.max(parsed.sequences?.tobaccoAromaId ?? 0, maxTobaccoAromaId),
         cashflowEntryId: Math.max(parsed.sequences?.cashflowEntryId ?? 0, maxCashflowEntryId),
-        stockCostLayerId: Math.max(parsed.sequences?.stockCostLayerId ?? 0, maxStockCostLayerId)
+        stockCostLayerId: Math.max(parsed.sequences?.stockCostLayerId ?? 0, maxStockCostLayerId),
+        stockReceiveBatchId: Math.max(parsed.sequences?.stockReceiveBatchId ?? 0, 0)
       }
     };
     migrateFifoLayersForProducts(store);

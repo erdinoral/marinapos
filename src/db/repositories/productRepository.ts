@@ -19,7 +19,7 @@ const STOCK_PURCHASE_EXPENSE_CATEGORY = "Mal alimi / stok";
 export class ProductRepository {
   constructor(private store: JsonStore) {}
 
-  /** Stok aliminda odenen tutari gunluk gidere yazar (Stok ekle / ilk stok). */
+  /** Stok aliminda odenen tutari gunluk gidere yazar (Stok ekle; Urun Ekle degil). */
   private recordStockPurchaseExpense(
     state: ReturnType<JsonStore["getState"]>,
     opts: {
@@ -232,32 +232,39 @@ export class ProductRepository {
       const unitCost = Math.max(0, Math.round(Number(payload.costPriceKurus ?? 0)));
       const saleUnit = cat?.saleUnit === "gram" ? "gram" : "piece";
       const lineCostKurus = unitCost > 0 ? lineCostKurusFromUnit(unitCost, stockQty, saleUnit) : 0;
+      let remainingDebtKurus = 0;
+      if (payload.initialStockRemainingDebtKurus != null) {
+        const d = Number(payload.initialStockRemainingDebtKurus);
+        if (!Number.isFinite(d) || d < 0) throw new Error("Kalan borc gecersiz.");
+        remainingDebtKurus = Math.round(d);
+      }
+      if (remainingDebtKurus > lineCostKurus) {
+        throw new Error("Kalan borc alis tutarindan fazla olamaz.");
+      }
+      if (remainingDebtKurus > 0 && supplierId <= 0) {
+        throw new Error("Borc icin tedarikci secin.");
+      }
+      const amountPaidKurus = lineCostKurus - remainingDebtKurus;
       const supplier = supplierId > 0 ? state.suppliers.find((s) => s.id === supplierId) : undefined;
       state.sequences.stockMovementId += 1;
       const movementId = state.sequences.stockMovementId;
-      const cashflowEntryId =
-        lineCostKurus > 0
-          ? this.recordStockPurchaseExpense(state, {
-              amountKurus: lineCostKurus,
-              productName: payload.name.trim(),
-              qtyLabel: formatQtyShort(stockQty, saleUnit),
-              stockMovementId: movementId,
-              supplierName: supplier?.name,
-              noteExtra: "Ilk stok (urun olusturma)"
-            })
-          : undefined;
+      let movementNote = "Ilk stok (urun olusturma)";
+      if (remainingDebtKurus > 0 && supplier) {
+        supplier.balanceOwedKurus += remainingDebtKurus;
+        movementNote += `; kalan borc ${(remainingDebtKurus / 100).toFixed(2)} TL`;
+      }
       state.stockMovements.push({
         id: movementId,
         productId: newId,
         type: "in",
         qty: payload.stockQty,
-        note: "Ilk stok (urun olusturma)",
+        note: movementNote,
         createdAt: new Date().toISOString(),
         costMode: "product",
         ...(supplierId > 0 ? { supplierId } : {}),
         ...(unitCost > 0 ? { unitCostKurus: unitCost, lineCostKurus, catalogLineCostKurus: lineCostKurus } : {}),
-        ...(lineCostKurus > 0 ? { amountPaidKurus: lineCostKurus } : {}),
-        ...(cashflowEntryId != null ? { cashflowEntryId } : {})
+        ...(lineCostKurus > 0 ? { amountPaidKurus } : {}),
+        ...(remainingDebtKurus > 0 ? { debtAddedKurus: remainingDebtKurus } : {})
       });
       if (unitCost > 0) {
         pushFifoLayer(state, newId, stockQty, unitCost, saleUnit, movementId);
@@ -440,6 +447,13 @@ export class ProductRepository {
       movementNote += `; kalan borc ${(remainingDebtKurus / 100).toFixed(2)} TL`;
     }
 
+    const receiveBatchId =
+      typeof input.receiveBatchId === "string" && input.receiveBatchId.trim()
+        ? input.receiveBatchId.trim()
+        : undefined;
+    if (receiveBatchId) {
+      movementNote += ` · Grup ${receiveBatchId}`;
+    }
     state.stockMovements.push({
       id: movementId,
       productId,
@@ -455,7 +469,8 @@ export class ProductRepository {
       amountPaidKurus,
       ...(remainingDebtKurus > 0 ? { debtAddedKurus: remainingDebtKurus } : {}),
       ...(costMode === "invoice" ? { invoicePaidKurus: costs.lineCostKurus } : {}),
-      ...(cashflowEntryId != null ? { cashflowEntryId } : {})
+      ...(cashflowEntryId != null ? { cashflowEntryId } : {}),
+      ...(receiveBatchId ? { receiveBatchId } : {})
     });
     pushFifoLayer(state, productId, quantity, costs.unitCostRecorded, saleUnit, movementId);
     this.store.save();
@@ -587,28 +602,36 @@ export class ProductRepository {
             : product?.supplierId != null && product.supplierId > 0
               ? product.supplierId
               : undefined;
-        const unitCostKurus = m.unitCostKurus != null && m.unitCostKurus >= 0 ? m.unitCostKurus : undefined;
-        const lineCostKurus =
-          m.lineCostKurus != null && m.lineCostKurus >= 0
-            ? m.lineCostKurus
-            : unitCostKurus != null
-              ? Math.round(unitCostKurus * m.qty)
+        const cardUnitKurus = Math.max(0, Math.round(Number(product?.costPriceKurus) || 0));
+        let unitCostKurus =
+          m.unitCostKurus != null && m.unitCostKurus > 0
+            ? Math.round(m.unitCostKurus)
+            : cardUnitKurus > 0
+              ? cardUnitKurus
               : undefined;
+        const catalogLineCostKurus =
+          m.catalogLineCostKurus != null && m.catalogLineCostKurus > 0
+            ? Math.round(m.catalogLineCostKurus)
+            : unitCostKurus != null && m.qty > 0
+              ? lineCostKurusFromUnit(unitCostKurus, m.qty, saleUnit)
+              : undefined;
+        let lineCostKurus =
+          m.lineCostKurus != null && m.lineCostKurus > 0
+            ? Math.round(m.lineCostKurus)
+            : m.costMode === "invoice" && m.invoicePaidKurus != null && m.invoicePaidKurus > 0
+              ? Math.round(m.invoicePaidKurus)
+              : catalogLineCostKurus != null && catalogLineCostKurus > 0
+                ? catalogLineCostKurus
+                : undefined;
         const supplierName =
           supplierId != null && supplierId > 0
             ? state.suppliers.find((s) => s.id === supplierId)?.name
             : undefined;
-        const catalogLineCostKurus =
-          m.catalogLineCostKurus != null && m.catalogLineCostKurus >= 0
-            ? m.catalogLineCostKurus
-            : unitCostKurus != null
-              ? lineCostKurusFromUnit(unitCostKurus, m.qty, saleUnit)
-              : undefined;
         return {
           movementId: m.id,
           createdAt: m.createdAt,
           productId: m.productId,
-          productName: product?.name ?? "(silinmis urun)",
+          productName: product?.name ?? (m.productId === 0 ? "Tedarikci borc odemesi" : "(silinmis urun)"),
           productCode: product?.code ?? "",
           qty: m.qty,
           note: m.note,
@@ -622,9 +645,18 @@ export class ProductRepository {
           ...(m.cashflowEntryId != null && m.cashflowEntryId > 0 ? { cashflowEntryId: m.cashflowEntryId } : {}),
           ...(m.amountPaidKurus != null && m.amountPaidKurus >= 0 ? { amountPaidKurus: m.amountPaidKurus } : {}),
           ...(m.debtAddedKurus != null && m.debtAddedKurus > 0 ? { debtAddedKurus: m.debtAddedKurus } : {}),
+          ...(m.receiveBatchId?.trim() ? { receiveBatchId: m.receiveBatchId.trim() } : {}),
           saleUnit
         };
       });
+  }
+
+  /** Gelen stok sepeti icin ortak fatura grubu kimligi */
+  nextReceiveBatchId(): string {
+    const state = this.store.getState();
+    state.sequences.stockReceiveBatchId = Math.max(0, Math.floor(Number(state.sequences.stockReceiveBatchId) || 0)) + 1;
+    this.store.save();
+    return `SRB-${state.sequences.stockReceiveBatchId}`;
   }
 
   getSupplierOverview(supplierId: number): SupplierOverview | null {
@@ -647,5 +679,54 @@ export class ProductRepository {
       return productIds.has(e.productId);
     });
     return { supplierId, products, stockEntries };
+  }
+
+  /** Tedarikci borc odemesi: borcu dusurur, tutari gunluk gidere (Mal alimi / stok) yazar. */
+  recordSupplierDebtPayment(
+    supplierId: number,
+    paymentType: "cash" | "card",
+    amountKurus?: number,
+    paymentNote?: string
+  ): void {
+    const state = this.store.getState();
+    const sid = Math.floor(Number(supplierId));
+    if (!Number.isFinite(sid) || sid <= 0) throw new Error("Tedarikci secilmelidir.");
+    const supplier = state.suppliers.find((s) => s.id === sid);
+    if (!supplier) throw new Error("Tedarikci bulunamadi.");
+    const balance = Math.max(0, Math.round(supplier.balanceOwedKurus));
+    if (balance <= 0) throw new Error("Acik borc yok.");
+    const pay =
+      amountKurus != null && Number.isFinite(Number(amountKurus))
+        ? Math.max(0, Math.round(Number(amountKurus)))
+        : balance;
+    if (pay <= 0) throw new Error("Odeme tutari gecersiz.");
+    if (pay > balance) throw new Error("Odeme tutari acik borctan fazla.");
+    supplier.balanceOwedKurus = balance - pay;
+    state.sequences.stockMovementId += 1;
+    const movementId = state.sequences.stockMovementId;
+    const payLabel = paymentType === "card" ? "kart" : "nakit";
+    const noteTrim = String(paymentNote ?? "").trim();
+    const noteExtra = [payLabel, noteTrim].filter(Boolean).join(" · ");
+    const cashflowEntryId = this.recordStockPurchaseExpense(state, {
+      amountKurus: pay,
+      productName: supplier.name,
+      qtyLabel: "Tedarikci borc odemesi",
+      stockMovementId: movementId,
+      noteExtra: noteExtra || payLabel
+    });
+    const movementNote = ["Tedarikci borc odemesi", payLabel, noteTrim].filter(Boolean).join(" · ");
+    state.stockMovements.push({
+      id: movementId,
+      productId: 0,
+      type: "in",
+      qty: 0,
+      note: movementNote,
+      createdAt: new Date().toISOString(),
+      supplierId: sid,
+      lineCostKurus: pay,
+      amountPaidKurus: pay,
+      ...(cashflowEntryId != null ? { cashflowEntryId } : {})
+    });
+    this.store.save();
   }
 }

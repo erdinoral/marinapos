@@ -133,6 +133,8 @@ export interface ProductInput {
   alternatePriceKurus?: number;
   /** POS Favori Satis; 1 = favori */
   posFavorite?: number;
+  /** Ilk stok aliminda odenmeyen kisim (kurus); tedarikci borcuna eklenir. Urun Ekle gidere yazmaz; gider Stok ekle ekranindadir. */
+  initialStockRemainingDebtKurus?: number | null;
 }
 
 /** Satış satırı: isteğe bağlı birim fiyat (indirimler uygulanmış net kurus) */
@@ -271,6 +273,8 @@ export interface CustomerPurchaseRow {
   totalRevenueKurus: number;
   transactionCount: number;
   lastPurchaseAt: string | null;
+  /** Son alis satisinin ID (fatura icin) */
+  lastSaleId: number | null;
 }
 
 export interface SupplierOverview {
@@ -302,6 +306,8 @@ export interface SaleRecord {
   debtPaidKurus?: number;
   /** POS müşteri kartı (varsa) */
   customerId?: number;
+  /** Borc odemesi / tahsilat notu */
+  paymentNote?: string;
 }
 
 export interface SaleLineDetail {
@@ -408,6 +414,8 @@ export interface Settings {
   lowStockThreshold: number;
   openingCashKurus: number;
   openingCashDate: string;
+  /** Ust barda gorunen uygulama / isletme basligi */
+  appTitle?: string;
   companyName: string;
   companyAddress: string;
   companyPhone: string;
@@ -457,6 +465,8 @@ export interface StockAddInput {
   recordExpense?: boolean;
   /** Alis tutarindan odenmeyen kisim (kurus); tedarikci borcuna eklenir */
   remainingDebtKurus?: number | null;
+  /** Gelen stok sepeti / fatura grubu (ayni batchId ile gecmiste gruplanir) */
+  receiveBatchId?: string | null;
 }
 
 export interface StockEntryLogRow {
@@ -478,6 +488,7 @@ export interface StockEntryLogRow {
   debtAddedKurus?: number;
   cashflowEntryId?: number;
   saleUnit?: CategorySaleUnit;
+  receiveBatchId?: string;
 }
 
 /** Tütün / aroma kartlari (icerik bilgisi) */
@@ -610,6 +621,7 @@ declare global {
       createProduct: (payload: ProductInput) => Promise<void>;
       updateProduct: (productId: number, patch: Partial<ProductInput>) => Promise<void>;
       addStock: (productId: number, quantity: number, input: StockAddInput) => Promise<void>;
+      nextReceiveBatchId: () => Promise<string>;
       adjustStock: (productId: number, countedQty: number, note?: string) => Promise<void>;
       lowStock: () => Promise<Product[]>;
       selectImage: (suggestedName?: string) => Promise<string>;
@@ -627,7 +639,8 @@ declare global {
       recordCustomerDebtPayment: (
         customerId: number,
         paymentType: PaymentType,
-        amountKurus?: number
+        amountKurus?: number,
+        paymentNote?: string
       ) => Promise<SaleRecord>;
       listCustomers: () => Promise<Customer[]>;
       createCustomer: (payload: CustomerInput) => Promise<Customer>;
@@ -639,6 +652,12 @@ declare global {
       listCustomerProductPrices: (customerId: number) => Promise<CustomerProductPrice[]>;
       setCustomerProductPrice: (customerId: number, productId: number, priceKurus: number) => Promise<void>;
       getSupplierOverview: (supplierId: number) => Promise<SupplierOverview | null>;
+      recordSupplierDebtPayment: (
+        supplierId: number,
+        paymentType: PaymentType,
+        amountKurus?: number,
+        paymentNote?: string
+      ) => Promise<void>;
       deleteProduct: (productId: number) => Promise<void>;
       deleteCategory: (categoryId: number) => Promise<void>;
       getSaleWithLines: (saleId: number) => Promise<SaleWithLines | null>;

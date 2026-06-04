@@ -27,6 +27,10 @@ export class SettingsRepository {
 
   setCompanyInfo(patch: Partial<Settings>) {
     const s = this.store.getState().settings;
+    if (patch.appTitle !== undefined) {
+      const t = String(patch.appTitle ?? "").trim();
+      s.appTitle = t || "Marina Nargile Otomasyon";
+    }
     s.companyName = (patch.companyName ?? s.companyName ?? "").trim();
     s.companyAddress = (patch.companyAddress ?? s.companyAddress ?? "").trim();
     s.companyPhone = (patch.companyPhone ?? s.companyPhone ?? "").trim();
