@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "offlineGraceDays": 7,
+  "globalLock": false,
+  "globalMessage": "Tum musteriler icin gecici bakim.",
+  "devices": {
+    "POS-A1B2C3D4": {
+      "locked": false,
+      "validUntil": "2026-12-31",
+      "message": "Odeme gecikmesi. Lutfen iletisime gecin: 05xx xxx xx xx"
+    },
+    "POS-DEADBEEF": {
+      "locked": true,
+      "message": "Odeme yapilmadi — erisim kapatildi."
+    }
+  }
+}

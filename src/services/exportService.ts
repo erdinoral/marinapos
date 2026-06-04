@@ -46,6 +46,7 @@ export function exportMonthlyProfitToXlsx(database: DatabaseService, yearMonth: 
       urunKodu: r.urunKodu,
       urunAdi: r.urunAdi,
       miktar: r.miktar,
+      miktarBirimi: r.miktarBirimi,
       birimGelisTL: r.birimGelisTl,
       birimSatisTL: r.birimSatisTl,
       maliyetToplamTL: r.maliyetToplamTl,

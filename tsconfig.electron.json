@@ -9,6 +9,6 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["electron", "src/db", "src/features/closure", "src/services", "src/types"],
+  "include": ["electron", "src/config/assistantModel.ts", "src/config/githubRelease.ts", "src/db", "src/features/closure", "src/services", "src/types"],
   "exclude": ["src/features/closure/**/*.tsx"]
 }

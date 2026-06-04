@@ -1,11 +1,28 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { getMarinaApi } from "../../api/marinaClient";
-import { Category } from "../../types/models";
+import { Category, Product, Supplier } from "../../types/models";
+import {
+  generateUniqueBarcode13,
+  uniqueCodeFromBarcode,
+  validateProductBarcodeUnique,
+  validateProductCodeUnique
+} from "../../utils/productCodes";
+import {
+  categorySaleUnitOf,
+  costPlaceholder,
+  costTlPer1000gToCostPriceKurus,
+  pricePlaceholder,
+  tlPer1000gToKurusPerGram,
+  wholesalePricePlaceholder
+} from "../../utils/saleUnit";
 import { tlToKurus } from "../../utils/currency";
+import { CategoryStockHint } from "./CategoryForm";
 
 interface Props {
   categories: Category[];
+  suppliers: Supplier[];
+  products: Product[];
   onCreated: () => Promise<void>;
 }
 
@@ -15,24 +32,54 @@ const initialState = {
   barcode: "",
   code: "",
   priceTl: "",
+  discountPercent: "",
   costTl: "",
-  stockQty: 0,
+  stockQty: "",
   imagePath: "",
-  categoryId: 0
+  categoryId: 0,
+  supplierId: 0,
+  material: "",
+  vatRatePercent: "20",
+  priceIncludesVat: false,
+  domesticMade: false,
+  wholesaleTl: "",
+  alternateTl: "",
+  posFavorite: false,
+  sellsWholesale: false
 };
 
-function generateBarcode13() {
-  const body = `869${Date.now().toString().slice(-8)}${Math.floor(Math.random() * 10)}`;
-  const digits = body.split("").map(Number);
-  const sum = digits.reduce((acc, d, idx) => acc + d * (idx % 2 === 0 ? 1 : 3), 0);
-  const checkDigit = (10 - (sum % 10)) % 10;
-  return `${body}${checkDigit}`;
-}
-
-export function ProductForm({ categories, onCreated }: Props) {
+export function ProductForm({ categories, suppliers, products, onCreated }: Props) {
   const [form, setForm] = useState(initialState);
-  const [newCategoryName, setNewCategoryName] = useState("");
   const [formMessage, setFormMessage] = useState("");
+  const [mediaDir, setMediaDir] = useState("");
+  /** Kullanici kod alanina dokunduysa barkod blur ile kod ezilmez */
+  const codeTouchedRef = useRef(false);
+
+  const saleUnit = useMemo(() => categorySaleUnitOf(categories, form.categoryId), [categories, form.categoryId]);
+
+  const applyBarcodeAndCode = () => {
+    setFormMessage("");
+    try {
+      const barcode = generateUniqueBarcode13(products);
+      const code = uniqueCodeFromBarcode(barcode, products);
+      codeTouchedRef.current = false;
+      setForm((prev) => ({ ...prev, barcode, code }));
+    } catch (e) {
+      setFormMessage(e instanceof Error ? e.message : "Barkod uretilemedi.");
+    }
+  };
+
+  const syncCodeFromBarcode = (barcodeOverride?: string) => {
+    setFormMessage("");
+    const b = (barcodeOverride ?? form.barcode).trim();
+    if (!b) return;
+    try {
+      const code = uniqueCodeFromBarcode(b, products);
+      setForm((prev) => ({ ...prev, code }));
+    } catch {
+      setFormMessage("Kod barkoda gore uretilemedi.");
+    }
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,7 +89,8 @@ export function ProductForm({ categories, onCreated }: Props) {
     const barcode = form.barcode.trim();
     const priceTl = Number(form.priceTl);
     const costTl = Number(form.costTl || 0);
-    const stockQty = Number(form.stockQty);
+    const discountPercent = Number(form.discountPercent || 0);
+    const stockQty = Number(String(form.stockQty).replace(",", "."));
 
     if (
       !name ||
@@ -52,6 +100,9 @@ export function ProductForm({ categories, onCreated }: Props) {
       priceTl <= 0 ||
       !Number.isFinite(costTl) ||
       costTl < 0 ||
+      !Number.isFinite(discountPercent) ||
+      discountPercent < 0 ||
+      discountPercent > 100 ||
       !Number.isFinite(stockQty) ||
       stockQty < 0 ||
       form.categoryId <= 0
@@ -60,19 +111,71 @@ export function ProductForm({ categories, onCreated }: Props) {
       return;
     }
 
+    if (!validateProductBarcodeUnique(barcode, products)) {
+      setFormMessage("Bu barkod baska bir urunde kayitli; farkli barkod girin veya barkod uretin.");
+      return;
+    }
+    if (!validateProductCodeUnique(code, products)) {
+      setFormMessage("Bu kod baska bir urunde kayitli; farkli kod girin.");
+      return;
+    }
+
+    if (saleUnit === "piece") {
+      if (!Number.isInteger(stockQty)) {
+        setFormMessage("Adetli kategoride stok tam sayi olmalidir.");
+        return;
+      }
+    } else {
+      if (!Number.isInteger(stockQty)) {
+        setFormMessage("Gramajli urunde stok tam sayi (g) olmalidir.");
+        return;
+      }
+      if (stockQty === 0) {
+        setFormMessage("Gramajli urunde stok 0 olamaz (en az kucuk bir miktar girin).");
+        return;
+      }
+    }
+
     try {
+      const vat = Number(form.vatRatePercent || 20);
+      const wholesaleTl = Number(String(form.wholesaleTl).replace(",", "."));
+      const alternateTl = Number(String(form.alternateTl).replace(",", "."));
+      if (!Number.isFinite(vat) || vat < 0 || vat > 100) {
+        setFormMessage("KDV orani 0-100 arasinda olmalidir.");
+        return;
+      }
       await getMarinaApi().createProduct({
         name,
         description: form.description.trim(),
         barcode,
         code,
-        priceKurus: tlToKurus(priceTl),
-        costPriceKurus: tlToKurus(costTl),
-        stockQty,
+        priceKurus: saleUnit === "gram" ? tlPer1000gToKurusPerGram(priceTl) : tlToKurus(priceTl),
+        discountPercent,
+        costPriceKurus: saleUnit === "gram" ? costTlPer1000gToCostPriceKurus(costTl) : tlToKurus(costTl),
+        stockQty: Math.round(stockQty),
         imagePath: form.imagePath.trim(),
-        categoryId: form.categoryId
+        categoryId: form.categoryId,
+        supplierId: form.supplierId,
+        material: form.material.trim(),
+        vatRatePercent: vat,
+        priceIncludesVat: form.priceIncludesVat,
+        domesticMade: form.domesticMade,
+        wholesalePriceKurus:
+          form.sellsWholesale && Number.isFinite(wholesaleTl) && wholesaleTl > 0
+            ? saleUnit === "gram"
+              ? tlPer1000gToKurusPerGram(wholesaleTl)
+              : tlToKurus(wholesaleTl)
+            : 0,
+        alternatePriceKurus:
+          Number.isFinite(alternateTl) && alternateTl > 0
+            ? saleUnit === "gram"
+              ? tlPer1000gToKurusPerGram(alternateTl)
+              : tlToKurus(alternateTl)
+            : 0,
+        posFavorite: form.posFavorite ? 1 : 0
       });
       setForm(initialState);
+      codeTouchedRef.current = false;
       setFormMessage("Urun kaydedildi.");
       await onCreated();
     } catch (error) {
@@ -80,26 +183,20 @@ export function ProductForm({ categories, onCreated }: Props) {
     }
   };
 
-  const createCategory = async () => {
-    const name = newCategoryName.trim();
-    if (!name) return;
-    setFormMessage("");
-    try {
-      const category = await getMarinaApi().createCategory(name);
-      setNewCategoryName("");
-      setForm((prev) => ({ ...prev, categoryId: category.id }));
-      setFormMessage(`Kategori secildi: ${category.name}`);
-      await onCreated();
-    } catch (error) {
-      setFormMessage(error instanceof Error ? error.message : "Kategori eklenemedi.");
-    }
-  };
-
   const selectImage = async () => {
-    const selectedPath = await getMarinaApi().selectImage();
+    const selectedPath = await getMarinaApi().selectImage(form.name.trim() || "urun");
     if (!selectedPath) return;
     setForm((prev) => ({ ...prev, imagePath: selectedPath }));
   };
+
+  useEffect(() => {
+    const api = getMarinaApi();
+    if (typeof api.getMediaDirectory !== "function") return;
+    void api.getMediaDirectory().then((dir) => setMediaDir(String(dir ?? ""))).catch(() => setMediaDir(""));
+  }, []);
+
+  const stockLabel = saleUnit === "gram" ? "Ilk stok (gram, tam sayi)" : "Ilk stok (adet)";
+  const stockStep = "1";
 
   return (
     <motion.form
@@ -111,16 +208,6 @@ export function ProductForm({ categories, onCreated }: Props) {
       <h2>Yeni Urun Ekle</h2>
       <input placeholder="Urun adi" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
       <input placeholder="Aciklama" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-      <div className="category-add">
-        <input
-          placeholder="Kategori adi yaz"
-          value={newCategoryName}
-          onChange={(e) => setNewCategoryName(e.target.value)}
-        />
-        <button type="button" onClick={() => void createCategory()}>
-          Kategori Ekle
-        </button>
-      </div>
       <select
         value={form.categoryId}
         onChange={(e) => setForm({ ...form, categoryId: Number(e.target.value) })}
@@ -131,40 +218,197 @@ export function ProductForm({ categories, onCreated }: Props) {
         </option>
         {categories.map((category) => (
           <option key={category.id} value={category.id}>
-            {category.name}
+            {category.name} ({category.saleUnit === "gram" ? "gram" : "adet"})
           </option>
         ))}
       </select>
-      <input placeholder="Kod" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} required />
+      <CategoryStockHint categories={categories} products={products} categoryId={form.categoryId} />
+      <select value={form.supplierId} onChange={(e) => setForm({ ...form, supplierId: Number(e.target.value) })}>
+        <option value={0}>Tedarikci sec (opsiyonel)</option>
+        {suppliers.map((supplier) => (
+          <option key={supplier.id} value={supplier.id}>
+            {supplier.name}
+          </option>
+        ))}
+      </select>
+      <label className="sale-unit-option product-domestic-toggle">
+        <input type="checkbox" checked={form.domesticMade} onChange={(e) => setForm({ ...form, domesticMade: e.target.checked })} />
+        Yerli uretim
+      </label>
       <div className="image-input-row">
-        <input placeholder="Barkod" value={form.barcode} onChange={(e) => setForm({ ...form, barcode: e.target.value })} required />
-        <button type="button" onClick={() => setForm((prev) => ({ ...prev, barcode: generateBarcode13() }))}>
+        <input
+          placeholder="Barkod"
+          value={form.barcode}
+          onChange={(e) => setForm({ ...form, barcode: e.target.value })}
+          onBlur={(e) => {
+            if (codeTouchedRef.current) return;
+            const b = e.target.value.trim();
+            if (b.length >= 8) syncCodeFromBarcode(b);
+          }}
+          required
+        />
+        <button type="button" onClick={() => applyBarcodeAndCode()}>
           Barkod Uret
+        </button>
+      </div>
+      <div className="image-input-row">
+        <input
+          placeholder="Kod (barkoda gore otomatik; elle de girebilirsiniz)"
+          value={form.code}
+          onChange={(e) => {
+            codeTouchedRef.current = e.target.value.trim().length > 0;
+            setForm({ ...form, code: e.target.value });
+          }}
+          required
+        />
+        <button
+          type="button"
+          onClick={() => {
+            codeTouchedRef.current = false;
+            syncCodeFromBarcode();
+          }}
+        >
+          Kodu barkoda gore
         </button>
       </div>
       <input
         type="number"
         step="0.01"
-        placeholder="Satis fiyati (TL)"
+        placeholder={pricePlaceholder(saleUnit)}
         value={form.priceTl}
         onChange={(e) => setForm({ ...form, priceTl: e.target.value })}
         required
+      />
+      <input placeholder="Malzeme / tedarik notu" value={form.material} onChange={(e) => setForm({ ...form, material: e.target.value })} />
+      <div className="sale-unit-row" role="group" aria-label="KDV">
+        <label className="sale-unit-option">
+          <input
+            type="number"
+            min={0}
+            max={100}
+            step={1}
+            value={form.vatRatePercent}
+            onChange={(e) => setForm({ ...form, vatRatePercent: e.target.value })}
+          />
+          <span>KDV %</span>
+        </label>
+        <label className="sale-unit-option">
+          <input
+            type="checkbox"
+            checked={form.priceIncludesVat}
+            onChange={(e) => setForm({ ...form, priceIncludesVat: e.target.checked })}
+          />
+          Fiyat KDV dahil
+        </label>
+      </div>
+      <h3 className="product-form-subheading">Toptan satis</h3>
+      <label className="sale-unit-option product-form-checkbox-row">
+        <input
+          type="checkbox"
+          checked={form.sellsWholesale}
+          onChange={(e) =>
+            setForm({
+              ...form,
+              sellsWholesale: e.target.checked,
+              wholesaleTl: e.target.checked ? form.wholesaleTl : ""
+            })
+          }
+        />
+        <span>Toptan satisa acik (toptanci musterilere farkli fiyat)</span>
+      </label>
+      {form.sellsWholesale ? (
+        <>
+          <p className="form-note product-form-section-note">
+            {saleUnit === "gram"
+              ? "Sepette Toptan seciliyken bu TL / 1000 g birim fiyat uygulanir. Bos birakilirsa perakende / 1000 g kullanilir."
+              : "Sepette Toptan seciliyken bu birim fiyat uygulanir. Bos birakilirsa perakende fiyat kullanilir."}
+          </p>
+          <input
+            type="number"
+            step="0.01"
+            min={0}
+            placeholder={wholesalePricePlaceholder(saleUnit)}
+            value={form.wholesaleTl}
+            onChange={(e) => setForm({ ...form, wholesaleTl: e.target.value })}
+          />
+        </>
+      ) : null}
+      <h3 className="product-form-subheading">Kart ile odeme fiyati</h3>
+      <p className="form-note product-form-section-note">
+        {saleUnit === "gram" ? (
+          <>
+            POS sepetinde odeme <strong>Kart</strong> seciliyken bu TL / <strong>1000 g</strong> birim fiyat uygulanir (orn. liste
+            1000 g 100 TL, kart 110 TL). Bos birakilirsa liste fiyati kullanilir.
+          </>
+        ) : (
+          <>
+            POS sepetinde odeme <strong>Kart</strong> seciliyken bu birim fiyat uygulanir (orn. liste 100 TL, kart 110 TL). Bos
+            birakilirsa liste fiyati kullanilir.
+          </>
+        )}
+      </p>
+      <input
+        type="number"
+        step="0.01"
+        min={0}
+        placeholder="Kart fiyati (TL, bos birakilabilir)"
+        value={form.alternateTl}
+        onChange={(e) => setForm({ ...form, alternateTl: e.target.value })}
+      />
+      <h3 className="product-form-subheading">Diger</h3>
+      <label className="sale-unit-option product-form-checkbox-row">
+        <input
+          type="checkbox"
+          checked={form.posFavorite}
+          onChange={(e) => setForm({ ...form, posFavorite: e.target.checked })}
+        />
+        <span>Favori satis (POS ust serit)</span>
+      </label>
+      <input
+        type="number"
+        min={0}
+        max={100}
+        step="0.01"
+        placeholder="Indirim (%)"
+        value={form.discountPercent}
+        onChange={(e) => setForm({ ...form, discountPercent: e.target.value })}
       />
       <input
         type="number"
         step="0.01"
         min={0}
-        placeholder="Gelis / maliyet (TL) birim"
+        placeholder={costPlaceholder(saleUnit)}
         value={form.costTl}
         onChange={(e) => setForm({ ...form, costTl: e.target.value })}
       />
-      <input type="number" min={0} placeholder="Ilk stok" value={String(form.stockQty)} onChange={(e) => setForm({ ...form, stockQty: Number(e.target.value) })} required />
+      <input
+        type="number"
+        min={0}
+        step={stockStep}
+        placeholder={stockLabel}
+        value={form.stockQty === "" ? "" : form.stockQty}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v === "") {
+            setForm({ ...form, stockQty: "" });
+            return;
+          }
+          setForm({ ...form, stockQty: saleUnit === "gram" ? String(Math.max(0, Math.round(Number(v) || 0))) : v });
+        }}
+        required
+      />
+      <p className="form-note product-form-section-note">
+        Ilk stok ve birim maliyet girilirse tutar <strong>Rapor → Gelir/Gider</strong> ekraninda{" "}
+        <strong>Mal alimi / stok</strong> olarak gunluk gidere yazilir. Sonraki alimlar icin{" "}
+        <strong>Stok → Stok ekle</strong> kullanin.
+      </p>
       <div className="image-input-row">
         <input placeholder="Resim yolu (opsiyonel)" value={form.imagePath} onChange={(e) => setForm({ ...form, imagePath: e.target.value })} />
         <button type="button" onClick={() => void selectImage()}>
           Resim Sec
         </button>
       </div>
+      {mediaDir ? <p className="form-message form-note">Resimler otomatik kaydedilir: {mediaDir}</p> : null}
       {formMessage && <p className="form-message">{formMessage}</p>}
       <button type="submit">Kaydet</button>
     </motion.form>

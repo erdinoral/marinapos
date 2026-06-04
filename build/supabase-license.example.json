@@ -1,0 +1,7 @@
+{
+  "url": "https://XXXXXXXX.supabase.co",
+  "anonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9....",
+  "appCode": "marina-pos",
+  "configTable": "pos_license_config",
+  "licensesTable": "pos_licenses"
+}

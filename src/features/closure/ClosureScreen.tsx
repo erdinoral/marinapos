@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { getMarinaApi } from "../../api/marinaClient";
-import { ClosureRunResult, DayProfitDetail, Settings } from "../../types/models";
-import { formatTry, tlToKurus } from "../../utils/currency";
+import { ClosureRunResult, DayProfitDetail, SaleRecord, Settings } from "../../types/models";
+import { formatTry } from "../../utils/currency";
+import { saleCollectedKurus } from "../../utils/saleCollected";
+import { formatQtyShort } from "../../utils/saleUnit";
 
 interface Props {
   settings: Settings;
@@ -10,60 +12,46 @@ interface Props {
 
 export function ClosureScreen({ settings }: Props) {
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
-  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [loading, setLoading] = useState(false);
-  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
-  const [exportMsg, setExportMsg] = useState("");
   const [last, setLast] = useState<ClosureRunResult | null>(null);
   const [dayProfit, setDayProfit] = useState<DayProfitDetail | null>(null);
-  const [openingCashTl, setOpeningCashTl] = useState(() => (settings.openingCashKurus / 100).toFixed(2));
-  const [actualCashTl, setActualCashTl] = useState("");
+  const [todaySales, setTodaySales] = useState<SaleRecord[]>([]);
 
-  const loadTodayProfit = useCallback(async () => {
+  const loadTodayData = useCallback(async () => {
     try {
-      const d = await getMarinaApi().getDayProfitDetail(today);
-      setDayProfit(d);
+      const api = getMarinaApi();
+      const [profit, sales] = await Promise.all([api.getDayProfitDetail(today), api.getDailySales(today)]);
+      setDayProfit(profit);
+      setTodaySales(sales);
     } catch {
       setDayProfit(null);
+      setTodaySales([]);
     }
   }, [today]);
 
   useEffect(() => {
-    void loadTodayProfit();
-  }, [loadTodayProfit]);
+    void loadTodayData();
+  }, [loadTodayData]);
 
-  useEffect(() => {
-    setOpeningCashTl((settings.openingCashKurus / 100).toFixed(2));
-  }, [settings.openingCashKurus]);
-
-  const saveOpeningCash = async () => {
-    const amount = Number(openingCashTl || 0);
-    if (!Number.isFinite(amount) || amount < 0) {
-      setError("Acilis kasasi 0 veya pozitif olmali.");
-      return;
+  const paymentBreakdown = useMemo(() => {
+    let cash = 0;
+    let card = 0;
+    for (const s of todaySales) {
+      const collected = saleCollectedKurus(s);
+      if (s.paymentType === "cash") cash += collected;
+      else card += collected;
     }
-    setError("");
-    await getMarinaApi().setOpeningCash(tlToKurus(amount));
-    setExportMsg("Acilis kasasi kaydedildi.");
-  };
+    return { cash, card, total: cash + card };
+  }, [todaySales]);
 
   const run = async () => {
     setLoading(true);
     setError("");
     try {
-      let actualCashValue: number | undefined;
-      if (actualCashTl.trim() !== "") {
-        const parsed = Number(actualCashTl);
-        if (!Number.isFinite(parsed) || parsed < 0) {
-          throw new Error("Gercek kasa tutari gecersiz.");
-        }
-        actualCashValue = tlToKurus(parsed);
-      }
-      const result = await getMarinaApi().runClosure(actualCashValue);
+      const result = await getMarinaApi().runClosure();
       setLast(result);
-      setActualCashTl("");
-      await loadTodayProfit();
+      await loadTodayData();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Kapanis alinamadi.");
     } finally {
@@ -81,21 +69,6 @@ export function ClosureScreen({ settings }: Props) {
     }
   };
 
-  const exportMonth = async () => {
-    setExporting(true);
-    setExportMsg("");
-    setError("");
-    try {
-      const filePath = await getMarinaApi().exportMonthlyProfitXlsx(month);
-      setExportMsg(`Excel kaydedildi: ${filePath}`);
-      await getMarinaApi().showItemInFolder(filePath);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Excel olusturulamadi.");
-    } finally {
-      setExporting(false);
-    }
-  };
-
   return (
     <motion.div
       className="closure-panel closure-panel-wide"
@@ -103,32 +76,20 @@ export function ClosureScreen({ settings }: Props) {
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -10 }}
     >
-      <h2>Kapanis</h2>
+      <h2>Kapanış</h2>
       <p className="closure-help">
         Gunluk kapanista ciro, <strong>gelis maliyeti</strong> ve <strong>kar</strong> hesaplanir;{" "}
         <code>reports/kapanis-AAAA-GG-GG.txt</code> dosyasina satir satir yazilir. Her gun icin ayrica{" "}
         <code>reports/kar-not-AAAA-AA.txt</code> dosyasina tek satir eklenir (aylik gunluk not).
-        Kapanis saati geldiginde (uygulama acikken) otomatik tekrarlanir.
+        Ayni gun yanlislikla erken kapanis alindiysa, tekrar &quot;Bugunun kapanisini al&quot; dediginizde kayit{" "}
+        <strong>bugunun satislariyla guncellenir</strong>; ertesi gune tasimaz. O gun icin hic kapanis yoksa kapanis
+        saatinde (uygulama acikken) bir kez otomatik alinir; gun zaten kapanmissa otomatik tekrarlanmaz, guncelleme
+        icin bu dugmeyi kullanin. Nakit ve kart tutarlari bugunun satis kayitlarindan otomatik alinir; fiziki kasa
+        sayimi girilmez.
       </p>
       <p className="closure-meta">
         Planlanan otomatik kapanis saati: <strong>{settings.closureTime}</strong>
       </p>
-      <section className="closure-month-export">
-        <h3>Kasa acilis</h3>
-        <p className="closure-help small">Acilis kasasi 0 olabilir. Bu tutar bugun icin beklenen nakit hesaplamasina dahil edilir.</p>
-        <div className="closure-month-row">
-          <input
-            type="number"
-            min={0}
-            step="0.01"
-            value={openingCashTl}
-            onChange={(e) => setOpeningCashTl(e.target.value)}
-            placeholder="Acilis kasasi (TL)"
-          />
-          <button type="button" onClick={() => void saveOpeningCash()}>Acilis Kasasini Kaydet</button>
-        </div>
-      </section>
-
       {dayProfit && (
         <section className="closure-today-block">
           <h3>Bugunun ozeti ({today})</h3>
@@ -157,8 +118,8 @@ export function ClosureScreen({ settings }: Props) {
                   <tr>
                     <th>Saat</th>
                     <th>Urun</th>
-                    <th>Adet</th>
-                    <th>Gelis (birim)</th>
+                    <th>Miktar</th>
+                    <th>Gelis</th>
                     <th>Satis (birim)</th>
                     <th>Maliyet</th>
                     <th>Ciro</th>
@@ -172,9 +133,13 @@ export function ClosureScreen({ settings }: Props) {
                       <td>
                         <span className="closure-code">{r.productCode}</span> {r.productName}
                       </td>
-                      <td>{r.qty}</td>
-                      <td>{formatTry(r.unitCostKurus)}</td>
-                      <td>{formatTry(r.unitPriceKurus)}</td>
+                      <td>{formatQtyShort(r.qty, r.saleUnit)}</td>
+                      <td>
+                        {r.saleUnit === "gram"
+                          ? `${formatTry(r.unitCostKurus)} / 1000 g`
+                          : formatTry(r.unitCostKurus)}
+                      </td>
+                      <td>{r.saleUnit === "gram" ? `${formatTry(r.unitPriceKurus)} / 1000 g` : formatTry(r.unitPriceKurus)}</td>
                       <td>{formatTry(r.lineCostKurus)}</td>
                       <td>{formatTry(r.lineTotalKurus)}</td>
                       <td className="sales-amount">{formatTry(r.lineProfitKurus)}</td>
@@ -188,35 +153,30 @@ export function ClosureScreen({ settings }: Props) {
       )}
 
       <div className="closure-actions-row">
-        <div className="closure-month-row">
-          <input
-            type="number"
-            min={0}
-            step="0.01"
-            value={actualCashTl}
-            onChange={(e) => setActualCashTl(e.target.value)}
-            placeholder="Kapanista sayilan gercek kasa (TL, opsiyonel)"
-          />
+        <div className="closure-close-payments">
+          <h3>Bugunun odeme ozeti (otomatik)</h3>
+          <p className="closure-help small">
+            Asagidaki tutarlar kayitli satislardan hesaplanir; kapanista el ile sayim girilmez.
+          </p>
+          <div className="closure-today-stats">
+            <div>
+              <span>Nakit</span>
+              <span className="sales-amount">{formatTry(paymentBreakdown.cash)}</span>
+            </div>
+            <div>
+              <span>Kart</span>
+              <span className="sales-amount">{formatTry(paymentBreakdown.card)}</span>
+            </div>
+            <div>
+              <span>Toplam</span>
+              <span className="sales-amount">{formatTry(paymentBreakdown.total)}</span>
+            </div>
+          </div>
         </div>
         <button type="button" className="closure-primary" disabled={loading} onClick={() => void run()}>
           {loading ? "Isleniyor..." : "Bugunun kapanisini al"}
         </button>
       </div>
-
-      <section className="closure-month-export">
-        <h3>Aylik Excel (satis + gelis + kar)</h3>
-        <p className="closure-help small">
-          Secilen ay icin tum satis satirlari ve gunluk ozet iki sayfada: <strong>SatisSatirlari</strong>,{" "}
-          <strong>GunlukOzet</strong>. Dosya Belgeler / MarinaNargileRaporlar altina kaydolur.
-        </p>
-        <div className="closure-month-row">
-          <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
-          <button type="button" disabled={exporting} onClick={() => void exportMonth()}>
-            {exporting ? "Olusturuluyor..." : "Excel indir"}
-          </button>
-        </div>
-        {exportMsg && <p className="form-message">{exportMsg}</p>}
-      </section>
 
       {error && <p className="form-message">{error}</p>}
       {last && (
@@ -228,8 +188,16 @@ export function ClosureScreen({ settings }: Props) {
             <li>Nakit: {formatTry(last.cashTotalKurus)}</li>
             <li>Kasa acilis: {formatTry(last.openingCashKurus)}</li>
             <li>Beklenen kasa: {formatTry(last.expectedCashKurus)}</li>
-            <li>Gercek sayilan kasa: {last.actualCashKurus == null ? "-" : formatTry(last.actualCashKurus)}</li>
-            <li>Kasa farki: <span className="sales-amount">{last.cashDiffKurus == null ? "-" : formatTry(last.cashDiffKurus)}</span></li>
+            <li>
+              Gercek sayilan kasa:{" "}
+              {last.actualCashKurus == null ? "— (sayim girilmedi)" : formatTry(last.actualCashKurus)}
+            </li>
+            <li>
+              Kasa farki:{" "}
+              <span className="sales-amount">
+                {last.cashDiffKurus == null ? "— (sayim yok)" : formatTry(last.cashDiffKurus)}
+              </span>
+            </li>
             <li>Kart: {formatTry(last.cardTotalKurus)}</li>
             <li>Ciro: {formatTry(last.grossRevenueKurus)}</li>
             <li>Maliyet: {formatTry(last.costTotalKurus)}</li>

@@ -1,20 +1,30 @@
 {
   "name": "marina-nargile-pos",
-  "version": "0.1.0",
+  "version": "1.7.1",
   "private": true,
+  "description": "Marina Nargile POS otomasyon",
+  "author": "Marina",
   "type": "module",
   "main": "dist-electron/electron/main.js",
   "scripts": {
     "electron:mark-cjs": "node scripts/ensure-dist-electron-cjs.mjs",
     "dev": "concurrently \"vite\" \"tsc -p tsconfig.electron.json --watch\" \"wait-on tcp:5173 file:dist-electron/electron/main.js && npm run electron:mark-cjs && electron .\"",
-    "build": "tsc -b && vite build && tsc -p tsconfig.electron.json && npm run electron:mark-cjs",
+    "copy:wasm": "node scripts/copy-transformers-wasm.mjs",
+    "build": "npm run copy:wasm && tsc -b && vite build && tsc -p tsconfig.electron.json && npm run electron:mark-cjs",
+    "postinstall": "node scripts/copy-transformers-wasm.mjs",
+    "pack": "npm run build && electron-builder --win --config.npmRebuild=false",
+    "publish:win": "npm run build && electron-builder --win --publish always --config.npmRebuild=false",
+    "pack:dir": "npm run build && electron-builder --win dir --config.npmRebuild=false",
     "preview": "vite preview",
     "lint": "eslint .",
     "start": "npm run electron:mark-cjs && electron ."
   },
   "dependencies": {
-    "electron": "^35.1.4",
+    "@supabase/supabase-js": "^2.106.0",
+    "@xenova/transformers": "^2.17.2",
+    "electron-updater": "^6.8.3",
     "framer-motion": "^12.38.0",
+    "jsbarcode": "^3.12.3",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "xlsx": "^0.18.5"
@@ -26,12 +36,62 @@
     "@types/react-dom": "^19.1.2",
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
+    "electron": "^35.1.4",
+    "electron-builder": "^26.8.1",
     "eslint": "^9.24.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.19",
+    "png-to-ico": "^3.0.1",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.29.1",
     "vite": "^6.3.2",
     "wait-on": "^8.0.3"
+  },
+  "build": {
+    "appId": "com.marina.nargile.pos",
+    "productName": "Marina Nargile POS",
+    "copyright": "Copyright © 2026",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "build/icons/**/*",
+      "build/license-registry.url",
+      "build/supabase-license.json",
+      "package.json"
+    ],
+    "asar": true,
+    "npmRebuild": false,
+    "asarUnpack": [
+      "node_modules/onnxruntime-node/**",
+      "node_modules/@xenova/transformers/**"
+    ],
+    "win": {
+      "icon": "build/icons/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-${version}-Setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "deleteAppDataOnUninstall": false,
+      "installerIcon": "build/icons/icon.ico",
+      "uninstallerIcon": "build/icons/icon.ico"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "erdinoral",
+      "repo": "marinapos"
+    }
   }
 }

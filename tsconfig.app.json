@@ -13,5 +13,27 @@
     "strict": true,
     "types": ["vite/client"]
   },
-  "include": ["src/main.tsx", "src/api/**/*.ts", "src/app/**/*.ts", "src/app/**/*.tsx", "src/features/closure/ClosureScreen.tsx", "src/features/pos/**/*.ts", "src/features/pos/**/*.tsx", "src/features/stock/**/*.ts", "src/features/stock/**/*.tsx", "src/features/products/**/*.ts", "src/features/products/**/*.tsx", "src/types/**/*.ts", "src/utils/**/*.ts"]
+  "include": [
+    "src/vite-env.d.ts",
+    "src/main.tsx",
+    "src/api/**/*.ts",
+    "src/app/**/*.ts",
+    "src/app/**/*.tsx",
+    "src/services/accountAuth.ts",
+    "src/features/account/**/*.ts",
+    "src/features/account/**/*.tsx",
+    "src/utils/feedbackFormat.ts",
+    "src/features/closure/ClosureScreen.tsx",
+    "src/features/pos/**/*.ts",
+    "src/features/pos/**/*.tsx",
+    "src/features/stock/**/*.ts",
+    "src/features/stock/**/*.tsx",
+    "src/features/products/**/*.ts",
+    "src/features/products/**/*.tsx",
+    "src/types/**/*.ts",
+    "src/utils/**/*.ts",
+    "src/config/assistantModel.ts",
+    "src/assistant/**/*.ts",
+    "src/assistant/**/*.tsx"
+  ]
 }

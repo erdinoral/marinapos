@@ -8,3 +8,14 @@ Thumbs.db
 .vscode/
 reports/
 data/
+release/
+release-build/
+release-*/
+build/license-registry.url
+build/supabase-license.json
+.env
+.env.local
+.env.*.local
+pos-license-admin/node_modules/
+pos-license-admin/dist/
+pos-license-admin/.env
