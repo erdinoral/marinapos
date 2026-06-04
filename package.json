@@ -78,7 +78,7 @@
           ]
         }
       ],
-      "artifactName": "${productName}-${version}-Setup.${ext}"
+      "artifactName": "Marina-Nargile-POS-${version}-Setup.${ext}"
     },
     "nsis": {
       "oneClick": false,
