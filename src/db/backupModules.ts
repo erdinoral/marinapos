@@ -178,6 +178,7 @@ function mergePartialData(target: Partial<MarinaStore>, part: Partial<MarinaStor
   if (part.sales) target.sales = part.sales;
   if (part.saleItems) target.saleItems = part.saleItems;
   if (part.stockMovements) target.stockMovements = part.stockMovements;
+  if (part.stockCostLayers) target.stockCostLayers = part.stockCostLayers;
   if (part.closures) target.closures = part.closures;
   if (part.cashflowEntries) target.cashflowEntries = part.cashflowEntries;
   if (part.settings) target.settings = part.settings;
@@ -214,7 +215,7 @@ function modulePresentInData(data: Partial<MarinaStore>, id: BackupModuleId): bo
     case "customers":
       return (data.customers?.length ?? 0) > 0;
     case "sales":
-      return (data.sales?.length ?? 0) > 0 || (data.saleItems?.length ?? 0) > 0;
+      return data.sales !== undefined || data.saleItems !== undefined;
     case "stock":
       return (data.stockMovements?.length ?? 0) > 0;
     case "closures":
@@ -297,6 +298,7 @@ export function applyRestoreModules(
         break;
       case "customers":
         if (part.customers) next.customers = part.customers;
+        if (part.customerProductPrices) next.customerProductPrices = part.customerProductPrices;
         break;
       case "sales":
         if (part.sales) next.sales = part.sales;
@@ -304,6 +306,7 @@ export function applyRestoreModules(
         break;
       case "stock":
         if (part.stockMovements) next.stockMovements = part.stockMovements;
+        if (part.stockCostLayers) next.stockCostLayers = part.stockCostLayers;
         break;
       case "closures":
         if (part.closures) next.closures = part.closures;
@@ -350,7 +353,7 @@ function extractModuleSlice(data: Partial<MarinaStore>, id: BackupModuleId): Par
     case "sales":
       return { sales: data.sales, saleItems: data.saleItems, sequences: data.sequences };
     case "stock":
-      return { stockMovements: data.stockMovements, sequences: data.sequences };
+      return { stockMovements: data.stockMovements, stockCostLayers: data.stockCostLayers, sequences: data.sequences };
     case "closures":
       return { closures: data.closures, sequences: data.sequences };
     case "cashflow":

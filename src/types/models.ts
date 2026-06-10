@@ -1,4 +1,4 @@
-import type { BackupInspectResult, BackupModuleId } from "./backup";
+import type { BackupInspectResult, BackupModuleId, BackupModuleStats } from "./backup";
 
 export type FeedbackImagePayload = {
   fileName: string;
@@ -91,6 +91,8 @@ export interface Product {
   imagePath: string;
   categoryId: number;
   supplierId: number;
+  /** Birincil disindaki tedarikciler (stok girisi / toplu fatura listesi) */
+  alternateSupplierIds?: number[];
   isActive: number;
   /** Toptancı / malzeme bilgisi */
   material: string;
@@ -124,6 +126,7 @@ export interface ProductInput {
   imagePath: string;
   categoryId: number;
   supplierId?: number;
+  alternateSupplierIds?: number[];
   material?: string;
   vatRatePercent?: number;
   priceIncludesVat?: boolean;
@@ -144,6 +147,8 @@ export interface SaleLineInput {
   unitPriceKurus?: number;
   /** Gram satista: kurus/gram gelis (tartili satis); yoksa urun kartindaki maliyet */
   unitCostKurus?: number;
+  /** Gram satista: tutar alanindan sabitlenen satir toplami (kurus) */
+  lineTotalKurus?: number;
 }
 
 export type CategorySaleUnit = "piece" | "gram";
@@ -326,6 +331,11 @@ export interface SaleWithLines {
   items: SaleLineDetail[];
 }
 
+export interface SaleHistoryListResult {
+  sales: SaleRecord[];
+  productIdsBySale: Record<number, number[]>;
+}
+
 export interface CartSalesSummary {
   cartName: string;
   salesCount: number;
@@ -399,7 +409,7 @@ export interface BackupFileInfo {
   createdAt: string;
 }
 
-export type { BackupModuleId, BackupModuleSelection, BackupInspectResult } from "./backup";
+export type { BackupModuleId, BackupModuleSelection, BackupInspectResult, BackupModuleStats } from "./backup";
 
 export interface ErrorLogEntry {
   id: string;
@@ -467,6 +477,20 @@ export interface StockAddInput {
   remainingDebtKurus?: number | null;
   /** Gelen stok sepeti / fatura grubu (ayni batchId ile gecmiste gruplanir) */
   receiveBatchId?: string | null;
+}
+
+export type StockMovementKind = "in" | "out" | "adjust";
+
+export interface StockMovementLogRow {
+  movementId: number;
+  createdAt: string;
+  productId: number;
+  productName: string;
+  productCode: string;
+  type: StockMovementKind;
+  qty: number;
+  note: string;
+  saleUnit?: CategorySaleUnit;
 }
 
 export interface StockEntryLogRow {
@@ -665,12 +689,14 @@ declare global {
       openExternalUrl: (url: string) => Promise<void>;
       getDailySales: (date: string) => Promise<SaleRecord[]>;
       getDailySaleProductIds: (date: string) => Promise<Record<number, number[]>>;
+      listSalesHistory: (limit?: number) => Promise<SaleHistoryListResult>;
       getDayProfitDetail: (date: string) => Promise<DayProfitDetail>;
       getMonthlyDayTotals: (yearMonth: string) => Promise<MonthlyDayTotal[]>;
       getTopSellingProducts: (limit?: number) => Promise<TopSellingProduct[]>;
       getDashboardReport: () => Promise<DashboardReport>;
       getStockAging: () => Promise<StockAgingRow[]>;
       getStockEntryLog: () => Promise<StockEntryLogRow[]>;
+      getStockMovementLog: () => Promise<StockMovementLogRow[]>;
       deleteStockEntry: (movementId: number) => Promise<void>;
       getSettings: () => Promise<Settings>;
       setOpeningTime: (openingTime: string) => Promise<void>;
@@ -692,6 +718,7 @@ declare global {
         extraFeeKurus?: number
       ) => Promise<string>;
       createBackup: (modules: BackupModuleId[]) => Promise<string>;
+      getBackupModuleStats: () => Promise<BackupModuleStats>;
       listBackups: () => Promise<BackupFileInfo[]>;
       inspectBackupByName: (backupName: string) => Promise<BackupInspectResult>;
       inspectBackupFromJson: (jsonText: string) => Promise<BackupInspectResult>;

@@ -1,22 +1,28 @@
 import type { CategorySaleUnit, StockCostMode, StockEntryLogRow } from "../types/models";
-import { gramLineTotalKurus, kurusPerGramToTlPer1000g } from "./saleUnit";
+import { gramLineTotalKurus, normalizeGramCartQty } from "./saleUnit";
 
 export function lineCostKurusFromUnit(unitCostKurus: number, qty: number, saleUnit: CategorySaleUnit): number {
   const unit = Math.max(0, Math.round(unitCostKurus));
+  if (unit <= 0 || qty <= 0) return 0;
+  if (saleUnit === "gram") {
+    const g = normalizeGramCartQty(qty);
+    if (g <= 0) return 0;
+    return gramLineTotalKurus(unit, g);
+  }
   const q = Math.max(0, Math.round(qty));
-  if (unit <= 0 || q <= 0) return 0;
-  if (saleUnit === "gram") return gramLineTotalKurus(unit, q);
   return Math.round(unit * q);
 }
 
 /** Fatura odemesine gore urun karti agirlikli ortalama birim maliyeti */
 export function unitCostKurusFromInvoicePaid(invoicePaidKurus: number, qty: number, saleUnit: CategorySaleUnit): number {
   const paid = Math.max(0, Math.round(invoicePaidKurus));
-  const q = Math.max(1, Math.round(qty));
   if (paid <= 0) return 0;
   if (saleUnit === "gram") {
-    return Math.round((paid * 1000) / q);
+    const g = normalizeGramCartQty(qty);
+    if (g <= 0) return 0;
+    return Math.round((paid * 1000) / g);
   }
+  const q = Math.max(1, Math.round(qty));
   return Math.round(paid / q);
 }
 

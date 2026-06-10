@@ -7,6 +7,7 @@ import { ProductRepository } from "./repositories/productRepository";
 import { SalesRepository } from "./repositories/salesRepository";
 import { SettingsRepository } from "./repositories/settingsRepository";
 import { TobaccoAromaRepository } from "./repositories/tobaccoAromaRepository";
+import type { BackupModuleStats } from "../types/backup";
 import {
   applyRestoreModules,
   buildBackupPayload,
@@ -55,6 +56,19 @@ export class DatabaseService {
 
   init() {
     this.store.save();
+  }
+
+  getBackupModuleStats(): BackupModuleStats {
+    const state = this.store.getState();
+    return {
+      catalog: state.products.length,
+      customers: state.customers.length,
+      sales: state.sales.length,
+      stock: state.stockMovements.length,
+      closures: state.closures.length,
+      cashflow: state.cashflowEntries.length,
+      settings: state.settings ? 1 : 0
+    };
   }
 
   createBackup(modules: BackupModuleId[], targetPath?: string): string {

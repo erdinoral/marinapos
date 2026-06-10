@@ -215,6 +215,7 @@ ipcMain.handle("products:adjust-stock", (_, productId: number, countedQty: numbe
 );
 ipcMain.handle("products:low-stock", () => database.products.lowStock());
 ipcMain.handle("products:stock-entry-log", () => database.products.listStockEntryLog());
+ipcMain.handle("products:stock-movement-log", () => database.products.listStockMovementLog());
 ipcMain.handle("products:delete-stock-entry", (_, movementId: number) => {
   database.products.deleteStockEntry(Number(movementId));
 });
@@ -328,6 +329,10 @@ ipcMain.handle(
 );
 ipcMain.handle("sales:daily", (_, date: string) => database.sales.getByDate(date));
 ipcMain.handle("sales:daily-product-ids", (_, date: string) => database.sales.getProductIdsBySaleForDate(date));
+ipcMain.handle("sales:history", (_, limit?: number) => {
+  const n = limit == null ? 0 : Number(limit);
+  return database.sales.listSalesHistory(Number.isFinite(n) ? n : 0);
+});
 ipcMain.handle("sales:detail", (_, saleId: number) => database.sales.getSaleWithLines(Number(saleId)));
 ipcMain.handle("sales:recent-detail", (_, date: string, limit?: number) =>
   database.sales.getRecentSalesWithLines(String(date ?? ""), Number(limit ?? 5))
@@ -355,6 +360,7 @@ ipcMain.handle("settings:set-opening-time", (_, openingTime: string) => database
 ipcMain.handle("settings:set-closure-time", (_, closureTime: string) => database.settings.setClosureTime(closureTime));
 ipcMain.handle("settings:set-opening-cash", (_, amountKurus: number) => database.settings.setOpeningCash(amountKurus));
 ipcMain.handle("settings:set-company-info", (_, patch: Partial<Settings>) => database.settings.setCompanyInfo(patch ?? {}));
+ipcMain.handle("settings:backup-stats", () => database.getBackupModuleStats());
 ipcMain.handle("settings:create-backup", async (_, modules: string[]) => {
   const now = new Date();
   const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}-${String(

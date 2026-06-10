@@ -19,6 +19,8 @@ import {
 import { parseTrAmount, tlToKurus } from "../../utils/currency";
 import { lineCostKurusFromUnit } from "../../utils/stockCost";
 import { CategoryStockHint } from "./CategoryForm";
+import { ProductSuppliersField } from "./ProductSuppliersField";
+import { normalizeAlternateSupplierIds } from "../../utils/productSuppliers";
 
 interface Props {
   categories: Category[];
@@ -39,6 +41,7 @@ const initialState = {
   imagePath: "",
   categoryId: 0,
   supplierId: 0,
+  alternateSupplierIds: [] as number[],
   material: "",
   vatRatePercent: "20",
   priceIncludesVat: false,
@@ -89,19 +92,20 @@ export function ProductForm({ categories, suppliers, products, onCreated }: Prop
     const name = form.name.trim();
     const code = form.code.trim();
     const barcode = form.barcode.trim();
-    const priceTl = Number(form.priceTl);
-    const costTl = Number(form.costTl || 0);
+    const priceParsed = parseTrAmount(form.priceTl);
+    const costParsed = parseTrAmount(String(form.costTl).trim() === "" ? "0" : form.costTl);
     const discountPercent = Number(form.discountPercent || 0);
-    const stockQty = Number(String(form.stockQty).replace(",", "."));
+    const stockRaw = String(form.stockQty).trim();
+    const stockQty = stockRaw === "" ? 0 : Number(stockRaw.replace(",", "."));
 
     if (
       !name ||
       !code ||
       !barcode ||
-      !Number.isFinite(priceTl) ||
-      priceTl <= 0 ||
-      !Number.isFinite(costTl) ||
-      costTl < 0 ||
+      priceParsed == null ||
+      priceParsed <= 0 ||
+      costParsed == null ||
+      costParsed < 0 ||
       !Number.isFinite(discountPercent) ||
       discountPercent < 0 ||
       discountPercent > 100 ||
@@ -112,6 +116,9 @@ export function ProductForm({ categories, suppliers, products, onCreated }: Prop
       setFormMessage("Lutfen zorunlu alanlari dogru doldurun.");
       return;
     }
+
+    const priceTl = priceParsed;
+    const costTl = costParsed;
 
     if (!validateProductBarcodeUnique(barcode, products)) {
       setFormMessage("Bu barkod baska bir urunde kayitli; farkli barkod girin veya barkod uretin.");
@@ -127,15 +134,9 @@ export function ProductForm({ categories, suppliers, products, onCreated }: Prop
         setFormMessage("Adetli kategoride stok tam sayi olmalidir.");
         return;
       }
-    } else {
-      if (!Number.isInteger(stockQty)) {
-        setFormMessage("Gramajli urunde stok tam sayi (g) olmalidir.");
-        return;
-      }
-      if (stockQty === 0) {
-        setFormMessage("Gramajli urunde stok 0 olamaz (en az kucuk bir miktar girin).");
-        return;
-      }
+    } else if (stockQty > 0 && !Number.isInteger(stockQty)) {
+      setFormMessage("Gramajli urunde stok tam sayi (g) olmalidir.");
+      return;
     }
 
     let initialStockRemainingDebtKurus: number | undefined;
@@ -162,8 +163,10 @@ export function ProductForm({ categories, suppliers, products, onCreated }: Prop
 
     try {
       const vat = Number(form.vatRatePercent || 20);
-      const wholesaleTl = Number(String(form.wholesaleTl).replace(",", "."));
-      const alternateTl = Number(String(form.alternateTl).replace(",", "."));
+      const wholesaleParsed = parseTrAmount(String(form.wholesaleTl).trim() === "" ? "0" : form.wholesaleTl);
+      const alternateParsed = parseTrAmount(String(form.alternateTl).trim() === "" ? "0" : form.alternateTl);
+      const wholesaleTl = wholesaleParsed ?? 0;
+      const alternateTl = alternateParsed ?? 0;
       if (!Number.isFinite(vat) || vat < 0 || vat > 100) {
         setFormMessage("KDV orani 0-100 arasinda olmalidir.");
         return;
@@ -181,6 +184,7 @@ export function ProductForm({ categories, suppliers, products, onCreated }: Prop
         imagePath: form.imagePath.trim(),
         categoryId: form.categoryId,
         supplierId: form.supplierId,
+        alternateSupplierIds: normalizeAlternateSupplierIds(form.alternateSupplierIds, form.supplierId),
         material: form.material.trim(),
         vatRatePercent: vat,
         priceIncludesVat: form.priceIncludesVat,
@@ -220,7 +224,7 @@ export function ProductForm({ categories, suppliers, products, onCreated }: Prop
     void api.getMediaDirectory().then((dir) => setMediaDir(String(dir ?? ""))).catch(() => setMediaDir(""));
   }, []);
 
-  const stockLabel = saleUnit === "gram" ? "Ilk stok (gram, tam sayi)" : "Ilk stok (adet)";
+  const stockLabel = saleUnit === "gram" ? "Ilk stok (gram, 0 olabilir)" : "Ilk stok (adet, 0 olabilir)";
   const stockStep = "1";
 
   return (
@@ -248,14 +252,14 @@ export function ProductForm({ categories, suppliers, products, onCreated }: Prop
         ))}
       </select>
       <CategoryStockHint categories={categories} products={products} categoryId={form.categoryId} />
-      <select value={form.supplierId} onChange={(e) => setForm({ ...form, supplierId: Number(e.target.value) })}>
-        <option value={0}>Tedarikci sec (opsiyonel)</option>
-        {suppliers.map((supplier) => (
-          <option key={supplier.id} value={supplier.id}>
-            {supplier.name}
-          </option>
-        ))}
-      </select>
+      <ProductSuppliersField
+        suppliers={suppliers}
+        primarySupplierId={form.supplierId}
+        alternateSupplierIds={form.alternateSupplierIds}
+        onChange={(supplierId, alternateSupplierIds) =>
+          setForm((prev) => ({ ...prev, supplierId, alternateSupplierIds }))
+        }
+      />
       <label className="sale-unit-option product-domestic-toggle">
         <input type="checkbox" checked={form.domesticMade} onChange={(e) => setForm({ ...form, domesticMade: e.target.checked })} />
         Yerli uretim
@@ -399,9 +403,8 @@ export function ProductForm({ categories, suppliers, products, onCreated }: Prop
         onChange={(e) => setForm({ ...form, discountPercent: e.target.value })}
       />
       <input
-        type="number"
-        step="0.01"
-        min={0}
+        type="text"
+        inputMode="decimal"
         placeholder={costPlaceholder(saleUnit)}
         value={form.costTl}
         onChange={(e) => setForm({ ...form, costTl: e.target.value })}
@@ -420,7 +423,6 @@ export function ProductForm({ categories, suppliers, products, onCreated }: Prop
           }
           setForm({ ...form, stockQty: saleUnit === "gram" ? String(Math.max(0, Math.round(Number(v) || 0))) : v });
         }}
-        required
       />
       {form.supplierId > 0 && Number(form.stockQty) > 0 && Number(form.costTl || 0) >= 0 ? (
         <label className="product-form-debt-field">

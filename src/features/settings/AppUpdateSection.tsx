@@ -126,6 +126,11 @@ export function AppUpdateSection() {
           {formatBytes(info.transferred)} / {formatBytes(info.total)}
         </p>
       ) : null}
+      {info?.phase === "error" ? (
+        <p className="muted small settings-update-hint settings-update-hint--error">
+          Gecici GitHub hatasi olabilir. <strong>Surumler sayfasi</strong> dugmesinden Setup dosyasini elle indirip kurabilirsiniz.
+        </p>
+      ) : null}
       {info?.releaseNotes?.trim() ? (
         <pre className="settings-update-notes">{info.releaseNotes.trim().slice(0, 800)}</pre>
       ) : null}

@@ -26,18 +26,34 @@ export function isProductLowStock(
   return product.stockQty < limit;
 }
 
-/** Kisa metin: "12 adet" / "250 g" (gram tam sayi) */
+/** Kisa metin: "12 adet" / "250 g" / "347,5 g" */
 export function formatQtyShort(qty: number, unit: CategorySaleUnit): string {
   if (unit === "gram") {
-    return `${Math.max(0, Math.round(qty))} g`;
+    return `${formatGramCartQtyDisplay(qty)} g`;
   }
   const n = Math.round(qty);
   return `${n} adet`;
 }
 
-/** Sepet / satis: gram tam sayi, en az 1 */
+/** Sepet / satis: gram tam sayi, en az 1 (stok girisi / sayim) */
 export function normalizeGramQty(grams: number): number {
   return Math.max(1, Math.round(Number(grams) || 0));
+}
+
+/** Sepet / tartili satis: gram kusuratli olabilir (min 0,01 g) */
+export function normalizeGramCartQty(grams: number): number {
+  const n = Number(grams);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.max(0.01, Math.round(n * 1000) / 1000);
+}
+
+/** Sepet gram alani gosterimi (1 ondalik) */
+export function formatGramCartQtyDisplay(grams: number): string {
+  const g = Number(grams);
+  if (!Number.isFinite(g) || g <= 0) return "0";
+  const tenths = Math.round(g * 10) / 10;
+  if (Number.isInteger(tenths)) return String(tenths);
+  return String(tenths).replace(".", ",");
 }
 
 /** Stok / sayim: gram tam sayi, 0 veya pozitif */
@@ -133,24 +149,28 @@ export function formatTlPer1000g(storedKurus: number): string {
   return `${formatTl(priceKurusToTlPer1000g(storedKurus))} / 1000 g`;
 }
 
-/** Gram satir tutari TL: (TL/1000g × gram) / 1000, 2 ondalik; gram tam sayi */
+/** Gram satir tutari TL: (TL/1000g × gram) / 1000, 2 ondalik; gram kusuratli olabilir */
 export function gramLineTotalTl(tlPer1000g: number, grams: number): number {
   const u = Math.max(0, Number(tlPer1000g) || 0);
-  const g = normalizeGramQty(grams);
+  const g = normalizeGramCartQty(grams);
   if (u <= 0 || g <= 0) return 0;
   return Math.round(((u * g) / 1000) * 100) / 100;
 }
 
-/** Tutar TL -> gram (tam sayi); maxStockGram verilirse stok ust sinirlanir */
+/** Tutar TL (tam sayi) -> gram (kusuratli); maxStockGram verilirse stok ust sinirlanir */
+export function gramsFromWholeLineTotalTl(totalTlWhole: number, tlPer1000g: number, maxStockGram?: number): number | null {
+  const tl = Math.max(1, Math.round(Number(totalTlWhole) || 0));
+  if (tlPer1000g <= 0 || tl <= 0) return null;
+  let grams = (tl * 1000) / tlPer1000g;
+  if (!Number.isFinite(grams) || grams <= 0) return null;
+  grams = Math.max(0.01, grams);
+  if (maxStockGram != null && maxStockGram > 0) grams = Math.min(grams, maxStockGram);
+  return grams;
+}
+
+/** @deprecated gramsFromWholeLineTotalTl kullanin (tam TL); geriye uyumluluk */
 export function gramsFromLineTotalTl(totalTl: number, tlPer1000g: number, maxStockGram?: number): number | null {
-  if (tlPer1000g <= 0 || totalTl <= 0) return null;
-  const grams = Math.round((totalTl * 1000) / tlPer1000g);
-  const g = Math.max(1, grams);
-  if (maxStockGram != null && maxStockGram >= 1) {
-    const max = Math.max(1, Math.round(maxStockGram));
-    return Math.min(g, max);
-  }
-  return g;
+  return gramsFromWholeLineTotalTl(Math.round(Number(totalTl) || 0), tlPer1000g, maxStockGram);
 }
 
 /** Depolama/kurus alanlari icin; hesap tamamen TL uzerinden yapilir */

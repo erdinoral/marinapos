@@ -1,90 +1,69 @@
-export const APP_VERSION = "1.8.0";
-export const APP_RELEASE_DATE = "04 Haziran 2026";
+export const APP_VERSION = "1.8.4";
+export const APP_RELEASE_DATE = "11 Haziran 2026";
 
 /** Hesap → Surumler ekraninda kartlar */
 export const APP_RELEASE_NOTES: { title: string; body: string }[] = [
   {
-    title: "Musteri / Kafe ve fatura",
+    title: "Coklu tedarikci",
     body:
-      "Gecmis satislardan fatura olusturma (onizleme, kayit). Musteri kartinda son alis icin Fatura. Son islemler listesinde Fatura dugmesi."
+      "Urun kartinda birincil tedarikci + ek tedarikci (+). Toplu faturada urun bagli tum firmalarda listelenir; tekli stok girisinde yalnizca karttaki tedarikciler secilir."
   },
   {
-    title: "Tedarikci stok ve fatura",
+    title: "AI Asistan paneli",
     body:
-      "Gelen / stok ekle: tedarikci urun listesi, sepet, tek fatura grubu (SRB). Gecmiste fatura tutari veya gelis fiyati toplami. Sepete ekle sag altta."
+      "Sag kenarda burger menusu ve AI Asistan etiketi; tiklayinca yan panel acilir. Sohbet tum ekranlarda erisilebilir."
   },
   {
-    title: "Cari ve borc",
+    title: "Stok listesi ozeti",
     body:
-      "Stok girisinde kismi tedarikci borcu; borc odeme (nakit/kart). Musteri borc tahsilati paneli. Tedarikci detayda maliyet / ciro / kar ozeti."
+      "Stok listesinde maliyet / ciro ozeti altta sabit kalir; yalnizca urun listesi kayar."
   },
   {
-    title: "POS stok etiketi",
+    title: "Urun duzenle arayuzu",
     body:
-      "Tum urun kartlarinda stok miktari: yesil (yeterli), sari (10 adet ve alti), kirmizi (stok yok). Favori ve en cok satanlarda da."
+      "Urun duzenle penceresindeki acilir listeler ve butonlar koyu temaya uyumlu hale getirildi."
   },
   {
-    title: "Sepet hizli adet",
+    title: "Satis gecmisi (1.8.3)",
     body:
-      "POS sepetinde ve gelen stok sepetinde +5 / +10 ile adet artirma. Birim TL ve Ind. % alanlari kompakt."
+      "Stok → Gecmis ve analiz → Satis gecmisi; filtreler, detay, fatura ve iade icin sepete alma."
   },
   {
-    title: "Stok ve arayuz",
+    title: "Moduler yedekleme (1.8.3)",
     body:
-      "Stok listesi kaydirma ve esit sutunlar. Duzenlenebilir uygulama basligi. Tutun icerikleri kartlari; hover icerik tam gorunur."
+      "Yedekleme ve geri yuklemede bolum secimi. Eski tam JSON yedekleri desteklenir."
   },
   {
-    title: "Gider kaydi",
-    body: "Urun Ekle artik gidere yazmaz. Stok alim gideri yalnizca Stok → Stok ekle (veya gelen stok) ile kaydedilir."
-  },
-  {
-    title: "Klavye ve guncelleme",
+    title: "POS toptan (1.8.2)",
     body:
-      "Windows/Electron klavye odak iyilestirmesi. Ayarlar: GitHub Release uzerinden otomatik surum kontrolu; veriler korunur."
+      "Sepette urun varken Toptan secilince satirlar toptan fiyata gecer."
   }
 ];
 
-/** GitHub Release / electron-updater — docs/RELEASE-1.8.0.md ile uyumlu */
-export const RELEASE_CHANGELOG_MD = `## Marina Nargile POS 1.8.0
+/** GitHub Release / electron-updater changelog */
+export const RELEASE_CHANGELOG_MD = `## Marina Nargile POS 1.8.4
 
-Kurulu uygulamalar **Ayarlar → Guncelleme** uzerinden bu surumu indirebilir. Verileriniz (satis, stok, musteri, ayarlar) korunur; yine de yayin oncesi yedek almaniz onerilir.
+Kurulu uygulamalar **Ayarlar → Guncelleme** uzerinden bu surumu indirebilir. Verileriniz korunur; yine de yayin oncesi yedek almaniz onerilir.
 
-### Yeni ozellikler
+### Yeni
 
-#### Musteri, kafe ve fatura
-- Gecmis satislardan **fatura olusturma** (onizleme, kaydet, yazdir)
-- Musteri/kafe kartinda son alis satiri icin **Fatura** dugmesi
-- Son islemler listesinde fatura (200 kayit)
+#### Coklu tedarikci
+- Urun karti: **birincil tedarikci** + **+** ile **ek tedarikci** (Tedarikci 2, 3…)
+- **Toplu fatura:** secilen firmaya bagli urunler listelenir; ayni urun birden fazla tedarikcide tanimliysa her firmada gorunur
+- **Gelen / stok ekle (tekli):** tedarikci listesi yalnizca urun kartindaki firmalardan gelir; stok secilen tedarikciye yazilir
+- Stok listesinde tedarikci: \`Firma A (+1)\` gibi gosterim
 
-#### Tedarikci ve stok girisi
-- **Gelen / stok ekle:** tedarikci secince o firmaya bagli urun listesi, sepet, tek fatura grubu (SRB)
-- Sepette **+5 / +10** hizli adet; **Sepete ekle** urun detayinin sag altinda
-- Tedarikci gecmisinde stok girisleri gruplanir; **fatura tutari** veya urun gelis fiyatindan hesaplanan tutar gorunur
-- Urun/stok girisinde **kismi borc**; tedarikci borc odemesi (nakit/kart, not)
-- Tedarikci detay: stok listesindeki gibi **maliyet / tahmini ciro / brut kar** ozeti
+#### AI Asistan
+- Sag kenar **burger menusu** ve dikey **AI Asistan** etiketi
+- Tiklayinca sagdan acilan **yan panel**; arka plana tiklayarak veya X ile kapanir
 
-#### Musteri borc
-- Musteri borc **tahsilat** paneli (nakit/kart, not)
+#### Stok listesi
+- Alt ozet (maliyet, tahmini ciro, kar) **sabit**; yalnizca urun listesi kayar
 
-#### POS ve stok gorunumu
-- Tum urun kartlarinda **stok etiketi:** yesil (yeterli), sari (≤10 adet), kirmizi (stok yok)
-- Sepet satirinda **+5 / +10** ile adet artirma; Birim TL ve Ind. % alanlari kompakt
+#### Urun duzenle
+- Kategori / tedarikci acilir listeleri ve Kapat / Vazgec butonlari koyu temaya uyumlu
 
-#### Diger
-- **Duzenlenebilir uygulama basligi** (Ayarlar)
-- **Tutun icerikleri** ekrani: aroma kartlari, uzerine gelince icerik; duzenleme modali
-- **Urun ekle** artik gidere yazmaz; gider yalnizca **Stok → Stok ekle** ile
-
-### Iyilestirmeler
-- Stok listesi kaydirma, ~15 satir gorunum, esit sutunlar
-- Klavye odak sorunu (Windows/Electron) azaltildi
-- Ayarlar: surumler ve geri bildirim butonlari tema ile uyumlu
-- Tutun ekraninda hover icerik kutusu kesilmez; gereksiz arka panel kaldirildi
-
-### Guncelleme
-- GitHub Release uzerinden otomatik surum kontrolu (electron-updater)
-
-### Teknik notlar
-- Kurulum boyutu optimizasyonlari (onceki surumlerle birlikte)
-- Lisans ve geri bildirim Supabase entegrasyonu (yapilandirmaya bagli)
+### Onceki surumden (1.8.3 ozeti)
+- Satis gecmisi, iade akisi, stok girisi silme, moduler yedekleme
+- POS toptan fiyat, stok ekrani sekmeleri, guncelleme ekrani iyilestirmeleri
 `;

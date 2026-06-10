@@ -72,7 +72,7 @@ export function AccountProfileCompanyTab({ onCompanySaved }: Props) {
           <input
             value={company.companyName}
             onChange={(e) => setCompany((p) => ({ ...p, companyName: e.target.value }))}
-            placeholder="Orn: Marina Nargile Hookah World"
+            placeholder="Orn: Marina Nargile"
             disabled={busy}
           />
         </label>

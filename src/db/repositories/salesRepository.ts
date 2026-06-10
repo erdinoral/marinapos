@@ -10,6 +10,7 @@ import {
   PaymentType,
   SaleKind,
   SaleLineDetail,
+  SaleLineInput,
   SaleRecord,
   SaleWithLines,
   StockAgingRow,
@@ -18,7 +19,7 @@ import {
 import { saleCollectedKurus } from "../../utils/saleCollected";
 import { JsonStore } from "../store";
 import { consumeFifo, restoreFifoOnReturn } from "../../utils/fifoStockCost";
-import { categorySaleUnitOf, gramLineTotalKurus, normalizeGramQty } from "../../utils/saleUnit";
+import { categorySaleUnitOf, gramLineTotalKurus, normalizeGramCartQty } from "../../utils/saleUnit";
 
 export interface MonthlySaleLineExport {
   satisTarihi: string;
@@ -92,7 +93,7 @@ export class SalesRepository {
   }
 
   create(
-    items: Array<{ productId: number; qty: number; unitPriceKurus?: number; unitCostKurus?: number }>,
+    items: SaleLineInput[],
     paymentType: PaymentType,
     paidAmount: number,
     kind: SaleKind = "sale",
@@ -113,7 +114,7 @@ export class SalesRepository {
       if (kind === "sale" && product.isActive !== 1) throw new Error("Urun bulunamadi veya pasif.");
       const saleUnit = categorySaleUnitOf(state.categories, product.categoryId);
       const isGram = saleUnit === "gram";
-      const qty = isGram ? normalizeGramQty(item.qty) : Math.round(item.qty);
+      const qty = isGram ? normalizeGramCartQty(item.qty) : Math.round(item.qty);
       /* Stok eksiye dusebilir; stok girisi sonrasi bakiye otomatik duzelir */
       const sign = kind === "return" ? -1 : 1;
       const discount = Math.max(0, Math.min(100, Number(product.discountPercent ?? 0)));
@@ -122,7 +123,9 @@ export class SalesRepository {
       const effectiveUnitPriceKurus =
         override != null ? Math.max(0, override) : Math.round((product.priceKurus * (100 - discount)) / 100);
       const lineTotalKurus = isGram
-        ? Math.round(gramLineTotalKurus(effectiveUnitPriceKurus, qty) / 100) * 100 * sign
+        ? item.lineTotalKurus != null && Number.isFinite(item.lineTotalKurus)
+          ? Math.max(0, Math.round(item.lineTotalKurus)) * sign
+          : gramLineTotalKurus(effectiveUnitPriceKurus, qty) * sign
         : Math.round(qty * effectiveUnitPriceKurus) * sign;
       let unitCostKurus = product.costPriceKurus ?? 0;
       let lineCostKurus = 0;
@@ -409,6 +412,23 @@ export class SalesRepository {
   getRecentSalesWithLines(date: string, limit = 5): SaleWithLines[] {
     const sales = this.getByDate(date).slice(0, Math.max(1, Math.min(50, limit)));
     return sales.map((s) => this.getSaleWithLines(s.id)).filter((x): x is SaleWithLines => x != null);
+  }
+
+  /** Tum satis gecmisi (en yeni ustte). limit <= 0 veya bos = tum kayitlar. */
+  listSalesHistory(limit?: number): { sales: SaleRecord[]; productIdsBySale: Record<number, number[]> } {
+    const state = this.store.getState();
+    const sorted = state.sales.slice().sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const rawLimit = Number(limit);
+    const sales =
+      Number.isFinite(rawLimit) && rawLimit > 0
+        ? sorted.slice(0, Math.min(50000, Math.floor(rawLimit)))
+        : sorted;
+    const productIdsBySale: Record<number, number[]> = {};
+    for (const item of state.saleItems) {
+      const bucket = productIdsBySale[item.saleId] ?? (productIdsBySale[item.saleId] = []);
+      if (!bucket.includes(item.productId)) bucket.push(item.productId);
+    }
+    return { sales, productIdsBySale };
   }
 
   getSummaryByDate(date: string) {

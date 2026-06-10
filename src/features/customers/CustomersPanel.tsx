@@ -34,6 +34,8 @@ import {
 import { DebtPaymentPanel } from "./DebtPaymentPanel";
 import { customersWithDebtByKind } from "../../utils/customerDebt";
 import { suppliersWithDebt } from "../../utils/supplierDebt";
+import { formatSaleDateTime } from "../../utils/saleFormat";
+import { productHasSupplier } from "../../utils/productSuppliers";
 import { categorySaleUnitOf, formatQtyShort, kurusPerGramToTlPer1000g, tlPer1000gToKurusPerGram } from "../../utils/saleUnit";
 
 type DetailTab = "info" | "prices" | "history";
@@ -54,12 +56,6 @@ function supplierHaystack(s: Supplier) {
 
 function customerDebtLabel(c: Customer) {
   return c.kind === "wholesale" && c.companyName.trim() ? `${c.companyName.trim()} · ${c.name}` : c.name;
-}
-
-function formatSaleTime(iso: string) {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso.slice(0, 16);
-  return d.toLocaleString("tr-TR", { dateStyle: "short", timeStyle: "short" });
 }
 
 function unitPriceLabel(categories: Category[], product: Product, kurus: number) {
@@ -291,7 +287,7 @@ export function CustomersPanel({
 
   const supplierInventoryTotals = useMemo(() => {
     if (!selectedSupplier) return null;
-    const supplierProducts = products.filter((p) => p.supplierId === selectedSupplier.id && p.isActive === 1);
+    const supplierProducts = products.filter((p) => p.isActive === 1 && productHasSupplier(p, selectedSupplier.id));
     return computeInventoryTotals(supplierProducts, categories, costLayers);
   }, [selectedSupplier, products, categories, costLayers]);
 
@@ -915,7 +911,7 @@ export function CustomersPanel({
                   <div>
                     <span className="customer-stats-label">Son islem</span>
                     <span className="customer-stats-value">
-                      {customerStats.lastTransactionAt ? formatSaleTime(customerStats.lastTransactionAt) : "—"}
+                      {customerStats.lastTransactionAt ? formatSaleDateTime(customerStats.lastTransactionAt) : "—"}
                     </span>
                   </div>
                 </div>
@@ -1065,7 +1061,7 @@ export function CustomersPanel({
                         </td>
                         <td>{formatQtyShort(r.totalQty, r.saleUnit)}</td>
                         <td>{formatTry(r.totalRevenueKurus)}</td>
-                        <td>{r.lastPurchaseAt ? formatSaleTime(r.lastPurchaseAt) : "—"}</td>
+                        <td>{r.lastPurchaseAt ? formatSaleDateTime(r.lastPurchaseAt) : "—"}</td>
                         <td className="customer-history-invoice-col">
                           {r.lastSaleId != null ? (
                             <button
@@ -1101,7 +1097,7 @@ export function CustomersPanel({
                         .filter((sw) => (sw.sale.debtAddedKurus ?? 0) > 0)
                         .map((sw) => (
                           <tr key={`debt-${sw.sale.id}`}>
-                            <td>{formatSaleTime(sw.sale.createdAt)}</td>
+                            <td>{formatSaleDateTime(sw.sale.createdAt)}</td>
                             <td>
                               <button type="button" className="linkish" onClick={() => onOpenSaleDetail(sw.sale.id)}>
                                 #{sw.sale.id}
@@ -1125,7 +1121,7 @@ export function CustomersPanel({
                   <li key={sw.sale.id} className="customer-recent-item">
                     <button type="button" className="customer-recent-btn" onClick={() => onOpenSaleDetail(sw.sale.id)}>
                       <span>
-                        #{sw.sale.id} · {formatSaleTime(sw.sale.createdAt)}
+                        #{sw.sale.id} · {formatSaleDateTime(sw.sale.createdAt)}
                         {sw.sale.kind === "debt_payment" ? (
                           <span className="muted small"> · Borc tahsilati</span>
                         ) : null}
@@ -1197,7 +1193,7 @@ export function CustomersPanel({
               </p>
               <SupplierStockBatchHistory
                 entries={supplierOverview.stockEntries.slice(0, 100)}
-                formatTime={formatSaleTime}
+                formatTime={formatSaleDateTime}
                 unitCostLabel={stockEntryUnitCostLabel}
               />
             </div>

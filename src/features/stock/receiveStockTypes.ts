@@ -1,5 +1,13 @@
 import type { CategorySaleUnit, StockCostMode } from "../../types/models";
 
+export type ReceiveStockPrefill = {
+  incomingCostTl?: string;
+  costMode?: StockCostMode;
+  invoicePaidTl?: string;
+  remainingDebtTl?: string;
+  supplierId?: number;
+};
+
 export type ReceiveCartLine = {
   id: string;
   productId: number;

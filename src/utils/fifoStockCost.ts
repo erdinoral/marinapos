@@ -1,4 +1,5 @@
 import type { Category, CategorySaleUnit, Product, StockCostLayer } from "../types/models";
+import { normalizeGramCartQty } from "./saleUnit";
 import { lineCostKurusFromUnit, unitCostKurusFromInvoicePaid } from "./stockCost";
 
 export type FifoStateSlice = {
@@ -37,7 +38,7 @@ export function pushFifoLayer(
   saleUnit: CategorySaleUnit,
   stockMovementId?: number
 ): void {
-  const q = saleUnit === "gram" ? Math.max(0, Math.round(qty)) : Math.max(0, Math.round(qty));
+  const q = saleUnit === "gram" ? normalizeGramCartQty(qty) : Math.max(0, Math.round(qty));
   const unit = Math.max(0, Math.round(unitCostKurus));
   if (q <= 0 || unit <= 0) return;
 
@@ -69,7 +70,7 @@ export function consumeFifo(
   qty: number,
   saleUnit: CategorySaleUnit
 ): { lineCostKurus: number; unitCostKurus: number } {
-  const lineQty = saleUnit === "gram" ? Math.max(1, Math.round(qty)) : Math.max(0, Math.round(qty));
+  const lineQty = saleUnit === "gram" ? normalizeGramCartQty(qty) : Math.max(0, Math.round(qty));
   if (lineQty <= 0) return { lineCostKurus: 0, unitCostKurus: 0 };
 
   let remaining = lineQty;

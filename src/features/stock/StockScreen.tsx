@@ -6,10 +6,8 @@ import {
   CategorySaleUnit,
   Product,
   Settings,
-  StockAddInput,
   StockAgingRow,
   StockCostLayer,
-  StockCostMode,
   StockEntryLogRow,
   Supplier
 } from "../../types/models";
@@ -17,30 +15,23 @@ import {
   categorySaleUnitOf,
   formatQtyShort,
   formatTlPer1000g,
-  incomingCostTlToUnitCostKurus,
   inventoryRevenueKurus,
   kurusPerGramToTlPer1000g,
-  normalizeGramQty,
   normalizeGramStockQty
 } from "../../utils/saleUnit";
-import { formatTry, parseTrAmount, tlToKurus } from "../../utils/currency";
+import { formatTry } from "../../utils/currency";
 import { resolveStockEntryUnitCostKurus, stockCostModeLabel } from "../../utils/stockCost";
 import { computeInventoryTotals, lineInventoryCostKurus } from "../../utils/inventoryTotals";
 import { StockInventorySummary } from "./StockInventorySummary";
-import { suppliersWithDebt, totalSupplierDebtKurus } from "../../utils/supplierDebt";
+import { productSupplierLabel } from "../../utils/productSuppliers";
 import { BarcodePrintModal } from "./BarcodePrintModal";
-import { StockCostFields } from "./StockCostFields";
 import { ReceiveStockModal } from "./ReceiveStockModal";
+import type { ReceiveStockPrefill } from "./receiveStockTypes";
+import { SalesHistoryPanel } from "../sales/SalesHistoryPanel";
 
 function netRetailUnitKurus(p: Product): number {
   const d = Math.max(0, Math.min(100, Number(p.discountPercent ?? 0)));
   return Math.round((p.priceKurus * (100 - d)) / 100);
-}
-
-function defaultCostTlForProduct(p: Product, unit: CategorySaleUnit): string {
-  const cost = p.costPriceKurus ?? 0;
-  if (cost <= 0) return "";
-  return incomingTlFromUnitCostKurus(cost, unit);
 }
 
 function incomingTlFromUnitCostKurus(kurus: number, unit: CategorySaleUnit): string {
@@ -55,12 +46,10 @@ function stockEntryUnitCostLabel(entry: StockEntryLogRow, unit: CategorySaleUnit
   return `${formatTry(kurus)} / adet`;
 }
 
-type StockAddPrefill = {
-  incomingCostTl?: string;
-  costMode?: StockCostMode;
-  supplierId?: number;
-  invoicePaidTl?: string;
-  remainingDebtTl?: string;
+type ReceiveModalState = {
+  initialProduct: Product | null;
+  bulkEntry: boolean;
+  prefill?: ReceiveStockPrefill;
 };
 
 interface Props {
@@ -70,49 +59,40 @@ interface Props {
   suppliers: Supplier[];
   lowStockThreshold: number;
   onStockChange: () => Promise<void>;
+  onStartReturnFromSale?: (saleId: number) => void;
 }
 
-export function StockScreen({ products, lowStock, categories, suppliers, lowStockThreshold, onStockChange }: Props) {
+export function StockScreen({ products, lowStock, categories, suppliers, lowStockThreshold, onStockChange, onStartReturnFromSale }: Props) {
   const [listQuery, setListQuery] = useState("");
-  const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [qty, setQty] = useState(1);
-  /** Stok Ekle: bu partinin birim gelisi (TL) */
-  const [incomingCostTl, setIncomingCostTl] = useState("");
-  const [stockAddCostMode, setStockAddCostMode] = useState<StockCostMode>("product");
-  const [stockAddInvoicePaidTl, setStockAddInvoicePaidTl] = useState("");
-  const [stockAddRemainingDebtTl, setStockAddRemainingDebtTl] = useState("");
-  const [stockAddSupplierId, setStockAddSupplierId] = useState(0);
   const [categoryFilter, setCategoryFilter] = useState<number>(0);
   const [agingRows, setAgingRows] = useState<StockAgingRow[]>([]);
   const [entryLog, setEntryLog] = useState<StockEntryLogRow[]>([]);
+  const [stockMainTab, setStockMainTab] = useState<"manage" | "history">("manage");
+  const [stockManageSubTab, setStockManageSubTab] = useState<"list" | "low">("list");
+  const [stockHistorySubTab, setStockHistorySubTab] = useState<"aging" | "entry" | "sales">("aging");
   const [deletingEntryId, setDeletingEntryId] = useState<number | null>(null);
   const [costLayers, setCostLayers] = useState<StockCostLayer[]>([]);
   const [barcodePrintOpen, setBarcodePrintOpen] = useState(false);
   const [printSettings, setPrintSettings] = useState<Settings | null>(null);
   /** Stok / eksik liste: sag tik menusu */
   const [stockRowContext, setStockRowContext] = useState<{ x: number; y: number; product: Product } | null>(null);
-  /** Eksik listeden acilan gelen / stok ekle modal */
-  const [receiveStockProduct, setReceiveStockProduct] = useState<Product | null>(null);
+  /** Gelen / toplu fatura modal */
+  const [receiveStockModal, setReceiveStockModal] = useState<ReceiveModalState | null>(null);
+  const [receiveModalKey, setReceiveModalKey] = useState(0);
   /** Stok listesinden acilan sayim / stok duzelt modal */
   const [listAdjustProduct, setListAdjustProduct] = useState<Product | null>(null);
   const [listAdjustCounted, setListAdjustCounted] = useState("");
   const [listAdjustNote, setListAdjustNote] = useState("");
   const [listAdjustSaving, setListAdjustSaving] = useState(false);
   const [detailProduct, setDetailProduct] = useState<Product | null>(null);
-  const stockAddSectionRef = useRef<HTMLElement>(null);
   const stockLayoutRef = useRef<HTMLDivElement>(null);
 
   const clearStockSelection = useCallback(() => {
     setSelectedId(null);
-    setQuery("");
-    setQty(1);
-    setIncomingCostTl("");
-    setStockAddSupplierId(0);
     setStockRowContext(null);
   }, []);
   const selectedProduct = useMemo(() => products.find((p) => p.id === selectedId) ?? null, [products, selectedId]);
-  const selectedUnit = selectedProduct ? categorySaleUnitOf(categories, selectedProduct.categoryId) : "piece";
   const listAdjustUnit = listAdjustProduct ? categorySaleUnitOf(categories, listAdjustProduct.categoryId) : "piece";
 
   const filterProducts = useCallback(
@@ -132,35 +112,18 @@ export function StockScreen({ products, lowStock, categories, suppliers, lowStoc
   );
 
   const listFiltered = useMemo(() => filterProducts(listQuery), [filterProducts, listQuery]);
-  const filtered = useMemo(() => filterProducts(query), [filterProducts, query]);
 
-  /** Eksik liste + Stok Ekle panelinde urunu sec; ilgili satirlara kaydir */
-  const selectForStockAdd = useCallback(
-    (product: Product, prefill?: StockAddPrefill) => {
-      const unit = categorySaleUnitOf(categories, product.categoryId);
-      setSelectedId(product.id);
-      setQuery(product.name.trim() || product.code.trim() || product.barcode.trim());
-      setQty(unit === "gram" ? 1000 : 1);
-      setStockAddSupplierId(
-        prefill?.supplierId != null && prefill.supplierId > 0
-          ? prefill.supplierId
-          : product.supplierId > 0
-            ? product.supplierId
-            : 0
-      );
-      setIncomingCostTl(prefill?.incomingCostTl ?? defaultCostTlForProduct(product, unit));
-      setStockAddCostMode(prefill?.costMode ?? "product");
-      setStockAddInvoicePaidTl(prefill?.invoicePaidTl ?? "");
-      setStockAddRemainingDebtTl(prefill?.remainingDebtTl ?? "");
-      setStockRowContext(null);
-      requestAnimationFrame(() => {
-        document.getElementById(`stock-low-row-${product.id}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-        stockAddSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-        document.getElementById(`stock-add-option-${product.id}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-      });
-    },
-    [categories]
-  );
+  const selectProduct = useCallback((product: Product) => {
+    setSelectedId(product.id);
+    setStockRowContext(null);
+  }, []);
+
+  const openReceiveStockModal = useCallback((product: Product, prefill?: ReceiveStockPrefill) => {
+    setSelectedId(product.id);
+    setReceiveModalKey((k) => k + 1);
+    setReceiveStockModal({ initialProduct: product, bulkEntry: false, prefill });
+    setStockRowContext(null);
+  }, []);
 
   const applyEntryLogToStockAdd = useCallback(
     (row: StockEntryLogRow) => {
@@ -171,7 +134,7 @@ export function StockScreen({ products, lowStock, categories, suppliers, lowStoc
       }
       const unit = row.saleUnit ?? categorySaleUnitOf(categories, p.categoryId);
       const unitKurus = resolveStockEntryUnitCostKurus(row, unit);
-      const prefill: StockAddPrefill = {
+      const prefill: ReceiveStockPrefill = {
         costMode: row.costMode ?? "product",
         supplierId: row.supplierId,
         invoicePaidTl:
@@ -182,10 +145,16 @@ export function StockScreen({ products, lowStock, categories, suppliers, lowStoc
       if (unitKurus != null && unitKurus > 0) {
         prefill.incomingCostTl = incomingTlFromUnitCostKurus(unitKurus, unit);
       }
-      selectForStockAdd(p, prefill);
+      openReceiveStockModal(p, prefill);
     },
-    [categories, products, selectForStockAdd]
+    [categories, products, openReceiveStockModal]
   );
+
+  const openBarcodePrint = useCallback((product: Product) => {
+    setSelectedId(product.id);
+    setBarcodePrintOpen(true);
+    setStockRowContext(null);
+  }, []);
 
   const openStockRowContextMenu = (e: { preventDefault: () => void; stopPropagation: () => void; clientX: number; clientY: number }, product: Product) => {
     e.preventDefault();
@@ -198,123 +167,10 @@ export function StockScreen({ products, lowStock, categories, suppliers, lowStoc
     setStockRowContext({ x, y, product });
   };
 
-  const openReceiveStockModal = (product: Product) => {
-    selectForStockAdd(product);
-    setReceiveStockProduct(product);
+  const openBulkInvoiceModal = () => {
+    setReceiveModalKey((k) => k + 1);
+    setReceiveStockModal({ initialProduct: null, bulkEntry: true });
     setStockRowContext(null);
-  };
-
-  const supplierDebtTotalKurus = useMemo(() => totalSupplierDebtKurus(suppliers), [suppliers]);
-  const suppliersInDebt = useMemo(() => suppliersWithDebt(suppliers), [suppliers]);
-
-  const applyRemainingDebtToInput = (input: StockAddInput, remainingDebtTl: string): boolean => {
-    const trimmed = String(remainingDebtTl ?? "").trim();
-    if (trimmed === "") return true;
-    const d = parseTrAmount(trimmed);
-    if (d == null || d < 0) {
-      window.alert("Kalan borc (TL) gecersiz.");
-      return false;
-    }
-    if (d === 0) return true;
-    input.remainingDebtKurus = tlToKurus(d);
-    return true;
-  };
-
-  const buildStockAddInput = (
-    product: Product,
-    unit: CategorySaleUnit,
-    costMode: StockCostMode,
-    costTl: string,
-    invoicePaidTl: string,
-    remainingDebtTl: string,
-    supplierId: number
-  ): StockAddInput | null => {
-    if (supplierId <= 0) {
-      window.alert("Tedarikci secin. Gelis kaydi ilgili tedarikci gecmisine yazilir.");
-      return null;
-    }
-    const input: StockAddInput = { supplierId, costMode, recordExpense: true };
-
-    if (costMode === "invoice") {
-      const paid = parseTrAmount(String(invoicePaidTl ?? "").trim());
-      if (paid == null || paid <= 0) {
-        window.alert("Odenen fatura tutari (TL) girin.");
-        return null;
-      }
-      input.invoicePaidKurus = tlToKurus(paid);
-      const trimmed = String(costTl ?? "").trim();
-      if (trimmed !== "") {
-        const parsed = incomingCostTlToUnitCostKurus(costTl, unit);
-        if (parsed === null) {
-          window.alert("Referans birim gelis (TL) gecersiz.");
-          return null;
-        }
-        if (parsed !== undefined) input.unitCostKurus = parsed;
-      }
-      if (!applyRemainingDebtToInput(input, remainingDebtTl)) return null;
-      return input;
-    }
-
-    const trimmed = String(costTl ?? "").trim();
-    if (trimmed !== "") {
-      const parsed = incomingCostTlToUnitCostKurus(costTl, unit);
-      if (parsed === null) {
-        window.alert("Birim gelis (TL) gecersiz.");
-        return null;
-      }
-      if (parsed === undefined) {
-        window.alert("Birim gelis (TL) girin.");
-        return null;
-      }
-      input.unitCostKurus = parsed;
-    } else if ((product.costPriceKurus ?? 0) <= 0) {
-      window.alert("Birim gelis (TL) girin veya urun kartinda maliyet tanimlayin.");
-      return null;
-    }
-    if (!applyRemainingDebtToInput(input, remainingDebtTl)) return null;
-    return input;
-  };
-
-  const submitStockAdd = async (
-    product: Product,
-    quantity: number,
-    unit: CategorySaleUnit,
-    costMode: StockCostMode,
-    costTl: string,
-    invoicePaidTl: string,
-    remainingDebtTl: string,
-    supplierId: number
-  ) => {
-    const input = buildStockAddInput(product, unit, costMode, costTl, invoicePaidTl, remainingDebtTl, supplierId);
-    if (!input) return false;
-    await getMarinaApi().addStock(product.id, quantity, input);
-    return true;
-  };
-
-  const addStock = async () => {
-    if (!selectedProduct || !selectedId || qty <= 0) return;
-    const q = selectedUnit === "gram" ? normalizeGramQty(qty) : qty;
-    if (selectedUnit === "gram" && !Number.isInteger(q)) {
-      window.alert("Gram miktar tam sayi olmalidir.");
-      return;
-    }
-    try {
-      const ok = await submitStockAdd(
-        selectedProduct,
-        q,
-        selectedUnit,
-        stockAddCostMode,
-        incomingCostTl,
-        stockAddInvoicePaidTl,
-        stockAddRemainingDebtTl,
-        stockAddSupplierId
-      );
-      if (!ok) return;
-      setIncomingCostTl(defaultCostTlForProduct(selectedProduct, selectedUnit));
-      await onStockChange();
-    } catch (e) {
-      window.alert(e instanceof Error ? e.message : "Stok eklenemedi.");
-    }
   };
 
   const openListAdjustModal = (p: Product) => {
@@ -352,20 +208,6 @@ export function StockScreen({ products, lowStock, categories, suppliers, lowStoc
       window.alert(e instanceof Error ? e.message : "Stok guncellenemedi.");
     } finally {
       setListAdjustSaving(false);
-    }
-  };
-
-  const deleteSelectedProduct = async () => {
-    if (!selectedId) return;
-    const p = products.find((x) => x.id === selectedId);
-    if (!p) return;
-    if (!window.confirm(`"${p.name}" urunu silinsin mi? (Kayit kalir, listede gorunmez.)`)) return;
-    try {
-      await getMarinaApi().deleteProduct(selectedId);
-      setSelectedId(null);
-      await onStockChange();
-    } catch (e) {
-      window.alert(e instanceof Error ? e.message : "Silinemedi.");
     }
   };
 
@@ -411,7 +253,7 @@ export function StockScreen({ products, lowStock, categories, suppliers, lowStoc
       if (!t) return;
       if (
         t.closest(
-          ".stock-row-main, .stock-row.danger, .stock-entry-row--clickable, .stock-add-panel, .stock-context-menu, .modal-backdrop, .modal-dialog, .stock-clear-selection-btn"
+          ".stock-row-main, .stock-row.danger, .stock-entry-row--clickable, .stock-context-menu, .modal-backdrop, .modal-dialog, .stock-clear-selection-btn"
         )
       ) {
         return;
@@ -439,16 +281,6 @@ export function StockScreen({ products, lowStock, categories, suppliers, lowStoc
   }, [stockRowContext]);
 
   useEffect(() => {
-    if (!selectedProduct) {
-      setStockAddSupplierId(0);
-      setIncomingCostTl("");
-      return;
-    }
-    setStockAddSupplierId(selectedProduct.supplierId > 0 ? selectedProduct.supplierId : 0);
-    setIncomingCostTl(defaultCostTlForProduct(selectedProduct, selectedUnit));
-  }, [selectedId, selectedProduct, selectedUnit]);
-
-  useEffect(() => {
     if (!listAdjustProduct) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !listAdjustSaving) setListAdjustProduct(null);
@@ -474,7 +306,7 @@ export function StockScreen({ products, lowStock, categories, suppliers, lowStoc
 
   const stockLabelForProduct = (p: Product) => formatQtyShort(p.stockQty, categorySaleUnitOf(categories, p.categoryId));
   const supplierNameById = useMemo(() => new Map(suppliers.map((s) => [s.id, s.name])), [suppliers]);
-  const supplierLabel = (p: Product) => supplierNameById.get(p.supplierId) ?? "-";
+  const supplierLabel = (p: Product) => productSupplierLabel(p, supplierNameById);
 
   const printLowStockList = () => {
     const rows = lowStock
@@ -572,16 +404,97 @@ ${rows || `<tr><td colspan="3">Eksik urun yok</td></tr>`}
 
   return (
     <div className="stock-layout" ref={stockLayoutRef}>
-      <section className="stock-panel-list stock-grid-list">
+      <header className="stock-screen-head">
+        <nav className="pos-pane-tabs stock-pane-tabs stock-pane-tabs--main" role="tablist" aria-label="Stok ekrani gruplari">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={stockMainTab === "manage"}
+            className={stockMainTab === "manage" ? "active" : ""}
+            onClick={() => setStockMainTab("manage")}
+          >
+            Stok yonetimi
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={stockMainTab === "history"}
+            className={stockMainTab === "history" ? "active" : ""}
+            onClick={() => setStockMainTab("history")}
+          >
+            Gecmis ve analiz
+          </button>
+        </nav>
+        {stockMainTab === "manage" ? (
+          <nav className="pos-pane-tabs stock-pane-tabs stock-pane-tabs--sub stock-pane-tabs--two" role="tablist" aria-label="Stok yonetimi">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={stockManageSubTab === "list"}
+              className={stockManageSubTab === "list" ? "active" : ""}
+              onClick={() => setStockManageSubTab("list")}
+            >
+              Stok Listesi
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={stockManageSubTab === "low"}
+              className={stockManageSubTab === "low" ? "active" : ""}
+              onClick={() => setStockManageSubTab("low")}
+            >
+              Eksik liste
+            </button>
+          </nav>
+        ) : (
+          <nav className="pos-pane-tabs stock-pane-tabs stock-pane-tabs--sub stock-pane-tabs--three" role="tablist" aria-label="Gecmis ve analiz">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={stockHistorySubTab === "aging"}
+              className={stockHistorySubTab === "aging" ? "active" : ""}
+              onClick={() => setStockHistorySubTab("aging")}
+            >
+              Stokta kalma / satis suresi
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={stockHistorySubTab === "entry"}
+              className={stockHistorySubTab === "entry" ? "active" : ""}
+              onClick={() => setStockHistorySubTab("entry")}
+            >
+              Stok ekleme gecmisi
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={stockHistorySubTab === "sales"}
+              className={stockHistorySubTab === "sales" ? "active" : ""}
+              onClick={() => setStockHistorySubTab("sales")}
+            >
+              Satis gecmisi
+            </button>
+          </nav>
+        )}
+      </header>
+      <div className="stock-screen-body">
+      {stockMainTab === "manage" && stockManageSubTab === "list" ? (
+      <section className="stock-panel-list stock-panel-tab-panel">
         <div className="stock-panel-list-top">
-          <h2>Stok Listesi</h2>
+          <h2 className="visually-hidden">Stok Listesi</h2>
           <p className="stock-help small">
             Kategori eklemek icin <strong>Urun Ekle</strong> sekmesindeki sag sutunu kullanin.
           </p>
           <p className="stock-help small">
-            Satira <strong>sol tik</strong>: urun <strong>Eksik liste</strong> ve <strong>Stok Ekle</strong> bolumlerinde secilir;
-            <strong>sag tik</strong>: gelen / stok ekle veya sayim duzeltme. <strong>Detay</strong>: maliyet ve satis tahmini.
+            Satira <strong>sol tik</strong>: urunu sec — <strong>sag tik</strong>: gelen / stok ekle veya sayim duzeltme.
+            <strong> Toplu fatura</strong> ile birden fazla urunu tek seferde kaydedin.
           </p>
+          <div className="stock-panel-list-actions">
+            <button type="button" className="stock-barcode-btn stock-bulk-invoice-btn" onClick={openBulkInvoiceModal}>
+              Toplu fatura
+            </button>
+          </div>
           <label className="search-wrap stock-list-search">
             <span className="search-icon">⌕</span>
             <input
@@ -596,7 +509,7 @@ ${rows || `<tr><td colspan="3">Eksik urun yok</td></tr>`}
                 if (barcode.length < 4) return;
                 e.preventDefault();
                 const found = listFiltered.find((p) => p.barcode === barcode);
-                if (found) selectForStockAdd(found);
+                if (found) selectProduct(found);
               }}
             />
           </label>
@@ -620,11 +533,11 @@ ${rows || `<tr><td colspan="3">Eksik urun yok</td></tr>`}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 title="Sol tik: urunu sec — Sag tik: gelen / stok ekle veya sayim duzelt"
-                onClick={() => selectForStockAdd(p)}
+                onClick={() => selectProduct(p)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
-                    selectForStockAdd(p);
+                    selectProduct(p);
                   }
                 }}
                 onContextMenu={(e) => openStockRowContextMenu(e, p)}
@@ -651,21 +564,20 @@ ${rows || `<tr><td colspan="3">Eksik urun yok</td></tr>`}
             ))}
           </div>
         </div>
-        {listFiltered.length > 15 ? (
-          <p className="stock-list-scroll-hint">Liste en fazla 15 satir gosterir; tum urunler icin asagiya kaydirin.</p>
-        ) : null}
         {listFiltered.length > 0 ? (
           <StockInventorySummary totals={listTotals} />
         ) : (
           <p className="stock-help small stock-list-empty-hint">Filtreye uyan urun yok.</p>
         )}
       </section>
-      <section className="stock-panel-list stock-grid-eksik">
+      ) : null}
+      {stockMainTab === "manage" && stockManageSubTab === "low" ? (
+      <section className="stock-panel-list stock-panel-tab-panel">
         <div className="stock-panel-list-top">
-          <h2>Eksik liste</h2>
+          <h2 className="visually-hidden">Eksik liste</h2>
           <p className="stock-help small">
             Esik: <strong>{lowStockThreshold}</strong> adet (adetli kategoriler) / <strong>1000</strong> g (gramajli
-            kategoriler). <strong>Sol tik</strong>: sagdaki <strong>Stok Ekle</strong> panelinde urunu secer.
+            kategoriler). <strong>Sol tik</strong>: urunu sec — <strong>sag tik</strong>: gelen / stok ekle veya sayim duzeltme.
           </p>
           <div className="stock-panel-list-actions">
             <button type="button" className="stock-barcode-btn" onClick={printLowStockList}>
@@ -690,16 +602,16 @@ ${rows || `<tr><td colspan="3">Eksik urun yok</td></tr>`}
               className={`stock-row danger${selectedId === p.id ? " stock-row-picked" : ""}`}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              title="Sol tik: Stok Ekle panelinde sec — tekrar tik: secimi kaldir — Sag tik: gelen / stok ekle veya sayim duzelt"
+              title="Sol tik: urunu sec — tekrar tik: secimi kaldir — Sag tik: gelen / stok ekle veya sayim duzelt"
               onClick={() => {
                 if (selectedId === p.id) clearStockSelection();
-                else selectForStockAdd(p);
+                else selectProduct(p);
               }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
                   if (selectedId === p.id) clearStockSelection();
-                  else selectForStockAdd(p);
+                  else selectProduct(p);
                 }
               }}
               onContextMenu={(e) => openStockRowContextMenu(e, p)}
@@ -711,9 +623,11 @@ ${rows || `<tr><td colspan="3">Eksik urun yok</td></tr>`}
           {lowStock.length === 0 && <p className="stock-help small">Eksik urun yok.</p>}
         </div>
       </section>
-      <section className="stock-panel-list stock-panel-aging stock-grid-aging">
+      ) : null}
+      {stockMainTab === "history" && stockHistorySubTab === "aging" ? (
+      <section className="stock-panel-list stock-panel-tab-panel stock-panel-aging">
         <div className="stock-panel-list-top stock-panel-list-top--compact">
-          <h2>Stokta kalma / satis suresi</h2>
+          <h2 className="visually-hidden">Stokta kalma / satis suresi</h2>
         </div>
         <div className="stock-scroll-body stock-scroll-body--list stock-scroll-body--aging">
           <div className="stock-aging-wrap">
@@ -740,11 +654,13 @@ ${rows || `<tr><td colspan="3">Eksik urun yok</td></tr>`}
           </div>
         </div>
       </section>
-      <section className="stock-panel-list stock-panel-entry-log stock-grid-history">
+      ) : null}
+      {stockMainTab === "history" && stockHistorySubTab === "entry" ? (
+      <section className="stock-panel-list stock-panel-tab-panel stock-panel-entry-log">
         <div className="stock-panel-list-top stock-panel-list-top--compact">
-          <h2>Stok ekleme gecmisi</h2>
+          <h2 className="visually-hidden">Stok ekleme gecmisi</h2>
           <p className="stock-help small">
-            En yeni kayitlar ustte. <strong>Satira tik</strong>: urun ve <strong>birim gelis</strong> sagdaki Stok Ekle alanina aktarilir.
+            En yeni kayitlar ustte. <strong>Satira tik</strong>: ayni urunle gelen / stok ekle penceresini acar (birim gelis dolu gelir).
             Sil: stok, mal alimi gideri ve tedarikci borcunu geri alir (urunun en son girisi).
           </p>
         </div>
@@ -772,7 +688,7 @@ ${rows || `<tr><td colspan="3">Eksik urun yok</td></tr>`}
                   role="button"
                   tabIndex={0}
                   className={`stock-entry-row stock-entry-row--cost stock-entry-row--clickable${selectedId === row.productId ? " stock-entry-row--picked" : ""}`}
-                  title="Tikla: Stok Ekle panelinde urun ve birim gelis"
+                  title="Tikla: gelen / stok ekle penceresini ac"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   onClick={() => applyEntryLogToStockAdd(row)}
@@ -847,105 +763,16 @@ ${rows || `<tr><td colspan="3">Eksik urun yok</td></tr>`}
           </div>
         </div>
       </section>
-      <section ref={stockAddSectionRef} className="stock-add-panel stock-grid-add" aria-label="Stok ekle">
-        <h2>Stok Ekle</h2>
-        {selectedProduct ? (
-          <div className="stock-add-selected-row">
-            <p className="stock-add-selected-hint">
-              Secili: <strong>{selectedProduct.name}</strong> — {stockLabelForProduct(selectedProduct)}
-            </p>
-            <button type="button" className="stock-clear-selection-btn" onClick={clearStockSelection}>
-              Secimi kaldir
-            </button>
-          </div>
-        ) : (
-          <p className="stock-help small">Listeden veya eksik listeden bir urun secin.</p>
-        )}
-        <input placeholder="Ad, kod, barkod ara" value={query} onChange={(e) => setQuery(e.target.value)} />
-        <div className="search-results">
-          {filtered.map((p) => (
-            <motion.button
-              whileHover={{ scale: 1.01 }}
-              key={p.id}
-              id={`stock-add-option-${p.id}`}
-              onClick={() => selectForStockAdd(p)}
-              className={selectedId === p.id ? "selected" : ""}
-            >
-              {p.name} ({p.code}/{p.barcode}) — {stockLabelForProduct(p)} — Tedarikci: {supplierLabel(p)}
-            </motion.button>
-          ))}
-        </div>
-        <button type="button" className="stock-barcode-btn" disabled={!selectedProduct} onClick={() => setBarcodePrintOpen(true)}>
-          Barkod yazdir
-        </button>
-        <button type="button" className="stock-delete-btn" disabled={!selectedProduct} onClick={() => void deleteSelectedProduct()}>
-          Urunu sil
-        </button>
-        <input
-          type="number"
-          min={selectedUnit === "gram" ? 1 : 1}
-          step="1"
-          value={qty}
-          onChange={(e) => {
-            const n = Number(e.target.value);
-            setQty(selectedUnit === "gram" ? Math.max(1, Math.round(n || 0)) : n);
-          }}
+      ) : null}
+      {stockMainTab === "history" && stockHistorySubTab === "sales" ? (
+        <SalesHistoryPanel
+          products={products}
+          categories={categories}
+          active={stockMainTab === "history" && stockHistorySubTab === "sales"}
+          onStartReturnFromSale={onStartReturnFromSale}
         />
-        {supplierDebtTotalKurus > 0 ? (
-          <p className="stock-supplier-debt-banner" role="status">
-            Tedarikci borcu toplam: <strong>{formatTry(supplierDebtTotalKurus)}</strong>
-            {suppliersInDebt.length > 0 ? (
-              <>
-                {" "}
-                —{" "}
-                {suppliersInDebt.map((s) => (
-                  <span key={s.id}>
-                    {s.name}{" "}
-                    <span className="supplier-debt-badge supplier-debt-badge-inline">{formatTry(s.balanceOwedKurus)}</span>
-                    {" · "}
-                  </span>
-                ))}
-              </>
-            ) : null}
-          </p>
-        ) : null}
-        <label className="stock-incoming-cost-label">
-          <span className="stock-incoming-cost-title">Tedarikci *</span>
-          <select
-            value={stockAddSupplierId}
-            disabled={!selectedProduct}
-            onChange={(e) => setStockAddSupplierId(Number(e.target.value))}
-          >
-            <option value={0}>Tedarikci secin</option>
-            {suppliers.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-                {s.balanceOwedKurus > 0 ? ` — borc ${formatTry(s.balanceOwedKurus)}` : ""}
-              </option>
-            ))}
-          </select>
-          <span className="stock-help small">Gelis kaydi secilen tedarikcinin gecmisine yazilir; urun karti da guncellenir.</span>
-        </label>
-        <StockCostFields
-          saleUnit={selectedUnit}
-          qty={qty}
-          costMode={stockAddCostMode}
-          onCostModeChange={setStockAddCostMode}
-          incomingCostTl={incomingCostTl}
-          onIncomingCostTlChange={setIncomingCostTl}
-          invoicePaidTl={stockAddInvoicePaidTl}
-          onInvoicePaidTlChange={setStockAddInvoicePaidTl}
-          remainingDebtTl={stockAddRemainingDebtTl}
-          onRemainingDebtTlChange={setStockAddRemainingDebtTl}
-          disabled={!selectedProduct}
-          product={selectedProduct}
-        />
-        <p className="stock-help small">
-          Gider, Rapor → Gelir/Gider ekraninda &quot;Mal alimi / stok&quot; olarak kaydedilir. Satista maliyet: once eski
-          parti (or. 20 ₺), o bitince yeni parti (or. 50 ₺); ayni fiyatla gelen miktar son partiye eklenir.
-        </p>
-        <button onClick={() => void addStock()}>{selectedUnit === "gram" ? "Gram Ekle" : "Adet Ekle"}</button>
-      </section>
+      ) : null}
+      </div>
       <BarcodePrintModal
         product={selectedProduct}
         categorySaleUnit={selectedProduct ? categorySaleUnitOf(categories, selectedProduct.categoryId) : "piece"}
@@ -980,6 +807,18 @@ ${rows || `<tr><td colspan="3">Eksik urun yok</td></tr>`}
               role="menuitem"
               onClick={(e) => {
                 e.stopPropagation();
+                openBarcodePrint(stockRowContext.product);
+              }}
+            >
+              Barkod yazdir
+            </button>
+          </li>
+          <li role="none">
+            <button
+              type="button"
+              role="menuitem"
+              onClick={(e) => {
+                e.stopPropagation();
                 openListAdjustModal(stockRowContext.product);
               }}
             >
@@ -988,13 +827,16 @@ ${rows || `<tr><td colspan="3">Eksik urun yok</td></tr>`}
           </li>
         </ul>
       ) : null}
-      {receiveStockProduct ? (
+      {receiveStockModal ? (
         <ReceiveStockModal
+          key={receiveModalKey}
           products={products}
           categories={categories}
           suppliers={suppliers}
-          initialProduct={receiveStockProduct}
-          onClose={() => setReceiveStockProduct(null)}
+          initialProduct={receiveStockModal.initialProduct}
+          bulkEntry={receiveStockModal.bulkEntry}
+          prefill={receiveStockModal.prefill}
+          onClose={() => setReceiveStockModal(null)}
           onSaved={onStockChange}
         />
       ) : null}

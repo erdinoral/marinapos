@@ -17,6 +17,8 @@ type Props = {
   onRemainingDebtTlChange: (v: string) => void;
   disabled?: boolean;
   product?: Product | null;
+  /** Toplu fatura modalinda onizleme blogu yer kaplar; false ile gizlenir */
+  showCostPreview?: boolean;
 };
 
 export function StockCostFields({
@@ -31,7 +33,8 @@ export function StockCostFields({
   remainingDebtTl,
   onRemainingDebtTlChange,
   disabled,
-  product
+  product,
+  showCostPreview = true
 }: Props) {
   const preview = useMemo(() => {
     const q = Math.max(0, Math.round(qty));
@@ -159,7 +162,18 @@ export function StockCostFields({
       </label>
 
       {preview && "error" in preview ? <p className="stock-cost-preview stock-cost-preview-warn">{preview.error}</p> : null}
-      {preview && "costs" in preview && preview.costs ? (
+      {!showCostPreview &&
+      preview &&
+      "costs" in preview &&
+      preview.costs &&
+      "remainingDebtKurus" in preview &&
+      preview.remainingDebtKurus != null &&
+      preview.remainingDebtKurus > 0 ? (
+        <p className="stock-cost-preview stock-cost-preview-row--debt small">
+          Bu kalem borcu: <strong>{formatTry(preview.remainingDebtKurus)}</strong>
+        </p>
+      ) : null}
+      {showCostPreview && preview && "costs" in preview && preview.costs ? (
         <div className="stock-cost-preview">
           <div className="stock-cost-preview-row">
             <span>Liste / birim hesabi</span>

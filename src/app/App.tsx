@@ -46,7 +46,7 @@ export function App() {
     openingCashKurus: 0,
     openingCashDate: "",
     appTitle: DEFAULT_APP_TITLE,
-    companyName: "Marina Nargile Hookah World",
+    companyName: "Marina Nargile",
     companyAddress: "",
     companyPhone: "",
     companyEmail: "",
@@ -60,6 +60,7 @@ export function App() {
     []
   );
   const [footerDate, setFooterDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [pendingReturnSaleId, setPendingReturnSaleId] = useState<number | null>(null);
 
   const refresh = useCallback(async () => {
     const api = getMarinaApi();
@@ -229,6 +230,8 @@ export function App() {
           lowStockThreshold={settings.lowStockThreshold}
           onSaleCompleted={refresh}
           onDataRefresh={refresh}
+          pendingReturnSaleId={pendingReturnSaleId}
+          onPendingReturnHandled={() => setPendingReturnSaleId(null)}
         />
       </div>
 
@@ -247,6 +250,10 @@ export function App() {
               suppliers={suppliers}
               lowStockThreshold={settings.lowStockThreshold}
               onStockChange={refresh}
+              onStartReturnFromSale={(saleId) => {
+                setPendingReturnSaleId(saleId);
+                setTab("pos");
+              }}
             />
           </motion.div>
         )}
@@ -329,7 +336,7 @@ export function App() {
         )}
         {tab === "settings" && (
           <motion.div key="settings" className="app-tab-content" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
-            <SettingsScreen onSettingsChange={refresh} />
+            <SettingsScreen />
           </motion.div>
         )}
       </AnimatePresence>
@@ -337,7 +344,7 @@ export function App() {
       <footer className="footer">
         <div className="footer-left">
           <div className="footer-company">
-            <strong>{settings.companyName.trim() || "Marina Nargile Hookah World"}</strong>
+            <strong>{settings.companyName.trim() || "Marina Nargile"}</strong>
             <span>Akiyom Tum haklari saklidir. 2026.</span>
           </div>
           <div className="footer-policies">

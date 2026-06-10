@@ -17,6 +17,7 @@ import {
   TobaccoAroma
 } from "../types/models";
 import { migrateFifoLayersForProducts } from "../utils/fifoStockCost";
+import { normalizeAlternateSupplierIds } from "../utils/productSuppliers";
 import { gramPriceKurusMigrate } from "../utils/saleUnit";
 
 export interface SaleItem {
@@ -148,7 +149,7 @@ export class JsonStore {
           openingCashKurus: 0,
           openingCashDate: "",
           appTitle: "Marina Nargile Otomasyon",
-          companyName: "Marina Nargile Hookah World",
+          companyName: "Marina Nargile",
           companyAddress: "",
           companyPhone: "",
           companyEmail: "",
@@ -291,10 +292,12 @@ export class JsonStore {
         : Math.max(0, Math.round(costPriceKurusRaw));
       const wholesalePriceKurus = Math.max(0, Math.round(Number(pp.wholesalePriceKurus ?? 0)));
       const alternatePriceKurus = Math.max(0, Math.round(Number(pp.alternatePriceKurus ?? 0)));
+      const supplierId = Math.max(0, Math.floor(Number(pp.supplierId ?? 0)));
       return {
         ...p,
         categoryId,
-        supplierId: Math.max(0, Math.floor(Number(pp.supplierId ?? 0))),
+        supplierId,
+        alternateSupplierIds: normalizeAlternateSupplierIds(pp.alternateSupplierIds, supplierId),
         priceKurus,
         costPriceKurus,
         discountPercent: Math.max(0, Math.min(100, Number(pp.discountPercent ?? 0))),
@@ -427,7 +430,11 @@ export class JsonStore {
         openingCashKurus: parsed.settings?.openingCashKurus ?? 0,
         openingCashDate: parsed.settings?.openingCashDate ?? "",
         appTitle: String(parsed.settings?.appTitle ?? "").trim() || "Marina Nargile Otomasyon",
-        companyName: parsed.settings?.companyName ?? "Marina Nargile Hookah World",
+        companyName: (() => {
+          const name = String(parsed.settings?.companyName ?? "").trim();
+          if (!name || name === "Marina Nargile Hookah World") return "Marina Nargile";
+          return name;
+        })(),
         companyAddress: parsed.settings?.companyAddress ?? "",
         companyPhone: parsed.settings?.companyPhone ?? "",
         companyEmail: parsed.settings?.companyEmail ?? "",

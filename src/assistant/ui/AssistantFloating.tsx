@@ -16,50 +16,63 @@ export function AssistantFloating({ config }: Props) {
   return (
     <>
       <AnimatePresence>
-        {open && (
-          <motion.div
-            className="assistant-float-panel"
-            initial={{ opacity: 0, y: 16, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 12, scale: 0.96 }}
+        {open ? (
+          <motion.button
+            type="button"
+            className="assistant-drawer-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
+            onClick={() => setOpen(false)}
+            aria-label="Asistani kapat"
+          />
+        ) : null}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {open ? (
+          <motion.aside
+            className="assistant-drawer"
+            initial={{ x: "100%" }}
+            animate={{ x: 0 }}
+            exit={{ x: "100%" }}
+            transition={{ type: "spring", damping: 30, stiffness: 320 }}
+            aria-label="AI Asistan paneli"
           >
-            <div className="assistant-float-header">
-              <div className="assistant-float-title-wrap">
-                <strong>{config.displayName}</strong>
-                <span className="assistant-float-subtitle">Test asamasinda, gelistirme devam ediyor.</span>
+            <header className="assistant-drawer-header">
+              <div className="assistant-drawer-title-wrap">
+                <img src={assistantIconSrc} alt="" className="assistant-drawer-icon" />
+                <div>
+                  <strong>AI Asistan</strong>
+                  <span className="assistant-drawer-subtitle">{config.displayName} · test asamasinda</span>
+                </div>
               </div>
-              <button type="button" className="assistant-float-close" onClick={() => setOpen(false)} aria-label="Kapat">
+              <button type="button" className="assistant-drawer-close" onClick={() => setOpen(false)} aria-label="Kapat">
                 ×
               </button>
-            </div>
-            <AssistantChat
-              dataPort={dataPort}
-              config={config}
-              compact
-            />
-          </motion.div>
-        )}
+            </header>
+            <AssistantChat dataPort={dataPort} config={config} compact />
+          </motion.aside>
+        ) : null}
       </AnimatePresence>
 
       <motion.button
         type="button"
-        className="assistant-fab"
+        className={`assistant-rail-trigger${open ? " assistant-rail-trigger--open" : ""}`}
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        aria-label={open ? "Asistani kapat" : "Asistani ac"}
-        whileHover={{ scale: 1.04 }}
-        whileTap={{ scale: 0.96 }}
+        aria-label={open ? "AI Asistani kapat" : "AI Asistani ac"}
+        whileHover={{ x: -2 }}
+        whileTap={{ scale: 0.98 }}
       >
-        {open ? (
-          <span className="assistant-fab-close" aria-hidden>
-            ×
-          </span>
-        ) : (
-          <img src={assistantIconSrc} alt="" className="assistant-fab-icon" />
-        )}
+        <span className="assistant-rail-burger" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </span>
+        <span className="assistant-rail-label">AI Asistan</span>
       </motion.button>
-
     </>
   );
 }

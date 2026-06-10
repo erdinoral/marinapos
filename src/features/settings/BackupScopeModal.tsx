@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
+import { getMarinaApi } from "../../api/marinaClient";
 import {
   BACKUP_MODULE_IDS,
   BACKUP_MODULE_LABELS,
+  formatBackupModuleCount,
   type BackupModuleId,
   type BackupModuleSelection,
+  type BackupModuleStats,
   type BackupInspectResult,
   emptyModuleSelection,
   selectedModuleIds
@@ -26,11 +29,25 @@ function fmtDate(iso: string | null) {
 
 export function BackupScopeModal({ mode, inspect, onConfirm, onCancel }: Props) {
   const [sel, setSel] = useState<BackupModuleSelection>(() => emptyModuleSelection(mode === "backup"));
+  const [stats, setStats] = useState<BackupModuleStats | null>(null);
+
+  useEffect(() => {
+    if (mode !== "backup") {
+      setStats(null);
+      return;
+    }
+    const api = getMarinaApi();
+    if (typeof api.getBackupModuleStats !== "function") return;
+    void api
+      .getBackupModuleStats()
+      .then(setStats)
+      .catch(() => setStats(null));
+  }, [mode]);
 
   const enabledIds = useMemo(() => {
     if (mode === "backup") return BACKUP_MODULE_IDS;
     if (!inspect) return [] as BackupModuleId[];
-    return BACKUP_MODULE_IDS.filter((id) => inspect.present[id]);
+    return BACKUP_MODULE_IDS.filter((id) => inspect.available[id]);
   }, [mode, inspect]);
 
   useEffect(() => {
@@ -41,7 +58,7 @@ export function BackupScopeModal({ mode, inspect, onConfirm, onCancel }: Props) 
     if (!inspect) return;
     const next = emptyModuleSelection(false);
     for (const id of BACKUP_MODULE_IDS) {
-      next[id] = inspect.present[id];
+      next[id] = inspect.available[id];
     }
     setSel(next);
   }, [mode, inspect]);
@@ -79,7 +96,9 @@ export function BackupScopeModal({ mode, inspect, onConfirm, onCancel }: Props) 
           </p>
         ) : (
           <p className="backup-scope-meta muted small">
-            Secili bolumler tek JSON dosyasinda ayri etiketlerle kaydedilir. Eski tam yedekler de geri yuklenebilir.
+            Secili bolumler tek JSON dosyasinda ayri etiketlerle kaydedilir.{" "}
+            <strong>Satislar ve satis gecmisi</strong> tum fisleri (sepet adlari, musterili/musterisiz, iade, borc odemesi)
+            icerir. Eski tam yedekler de geri yuklenebilir.
           </p>
         )}
         <label className="backup-scope-select-all">
@@ -95,7 +114,15 @@ export function BackupScopeModal({ mode, inspect, onConfirm, onCancel }: Props) 
                 <label>
                   <input type="checkbox" checked={sel[id]} disabled={disabled} onChange={() => toggle(id)} />
                   <span className="backup-scope-item-title">{meta.title}</span>
-                  <span className="backup-scope-item-desc muted small">{meta.description}</span>
+                  <span className="backup-scope-item-desc muted small">
+                    {meta.description}
+                    {mode === "backup" && stats ? (
+                      <>
+                        {" "}
+                        · <strong>{formatBackupModuleCount(id, stats[id])}</strong>
+                      </>
+                    ) : null}
+                  </span>
                   {disabled ? <span className="backup-scope-missing muted small">Bu yedekte yok</span> : null}
                 </label>
               </li>

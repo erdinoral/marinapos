@@ -5,12 +5,14 @@ import {
   ProductInput,
   StockAddInput,
   StockEntryLogRow,
+  StockMovementLogRow,
   Supplier,
   SupplierInput,
   SupplierOverview
 } from "../../types/models";
 import { activeFifoUnitCostKurus, pushFifoLayer, resetFifoLayersToQty, reverseStockAddFifo } from "../../utils/fifoStockCost";
 import { computeStockAddCosts, lineCostKurusFromUnit } from "../../utils/stockCost";
+import { productHasSupplier, normalizeAlternateSupplierIds } from "../../utils/productSuppliers";
 import { categorySaleUnitOf, formatQtyShort } from "../../utils/saleUnit";
 import { JsonStore } from "../store";
 
@@ -62,7 +64,11 @@ export class ProductRepository {
   /** Iade gibi islemler icin; pasif urunler dahil */
   getById(productId: number): Product | null {
     const p = this.store.getState().products.find((x) => x.id === productId);
-    return p ? { ...p } : null;
+    if (!p) return null;
+    return {
+      ...p,
+      alternateSupplierIds: normalizeAlternateSupplierIds(p.alternateSupplierIds, p.supplierId)
+    };
   }
 
   listCategories() {
@@ -136,14 +142,17 @@ export class ProductRepository {
 
   deleteSupplier(supplierId: number) {
     const state = this.store.getState();
-    if (state.products.some((p) => p.supplierId === supplierId && p.isActive === 1)) {
-      throw new Error("Bu tedarikciye bagli aktif urun var; once urunlerden tedarikciyi degistirin.");
+    if (state.products.some((p) => p.isActive === 1 && productHasSupplier(p, supplierId))) {
+      throw new Error("Bu tedarikciye bagli aktif urun var; once urunlerden tedarikciyi cikartin.");
     }
     const before = state.suppliers.length;
     state.suppliers = state.suppliers.filter((s) => s.id !== supplierId);
     if (before === state.suppliers.length) throw new Error("Tedarikci bulunamadi.");
     for (const p of state.products) {
       if (p.supplierId === supplierId) p.supplierId = 0;
+      if (p.alternateSupplierIds?.length) {
+        p.alternateSupplierIds = p.alternateSupplierIds.filter((id) => id !== supplierId);
+      }
     }
     this.store.save();
   }
@@ -225,6 +234,10 @@ export class ProductRepository {
       alternatePriceKurus: Math.max(0, Math.round(Number(payload.alternatePriceKurus ?? 0))),
       posFavorite: payload.posFavorite === 1 ? 1 : 0,
       supplierId: Math.max(0, Math.floor(Number(payload.supplierId ?? 0))),
+      alternateSupplierIds: normalizeAlternateSupplierIds(
+        payload.alternateSupplierIds,
+        Math.max(0, Math.floor(Number(payload.supplierId ?? 0)))
+      ),
       isActive: 1
     });
     if (payload.stockQty > 0) {
@@ -309,7 +322,14 @@ export class ProductRepository {
     }
     if (patch.description != null) product.description = String(patch.description).trim();
     if (patch.imagePath != null) product.imagePath = String(patch.imagePath);
-    if (patch.supplierId != null) product.supplierId = Math.max(0, Math.floor(Number(patch.supplierId)));
+    if (patch.supplierId != null) {
+      product.supplierId = Math.max(0, Math.floor(Number(patch.supplierId)));
+    }
+    if ("alternateSupplierIds" in patch) {
+      product.alternateSupplierIds = normalizeAlternateSupplierIds(patch.alternateSupplierIds, product.supplierId);
+    } else if (patch.supplierId != null) {
+      product.alternateSupplierIds = normalizeAlternateSupplierIds(product.alternateSupplierIds, product.supplierId);
+    }
     if (patch.discountPercent != null) {
       product.discountPercent = Math.max(0, Math.min(100, Number(patch.discountPercent)));
     }
@@ -376,8 +396,8 @@ export class ProductRepository {
     if (explicitSupplierId <= 0 || !state.suppliers.some((s) => s.id === explicitSupplierId)) {
       throw new Error("Tedarikci bulunamadi.");
     }
-    if (product.supplierId !== explicitSupplierId) {
-      product.supplierId = explicitSupplierId;
+    if (!productHasSupplier(product, explicitSupplierId)) {
+      throw new Error("Secilen tedarikci bu urun kartinda tanimli degil.");
     }
     const supplier = state.suppliers.find((s) => s.id === explicitSupplierId);
 
@@ -651,6 +671,30 @@ export class ProductRepository {
       });
   }
 
+  listStockMovementLog(limit = 300): StockMovementLogRow[] {
+    const state = this.store.getState();
+    const nameById = new Map(state.products.map((p) => [p.id, p]));
+    return state.stockMovements
+      .slice()
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, limit)
+      .map((m) => {
+        const product = nameById.get(m.productId);
+        const saleUnit = categorySaleUnitOf(state.categories, product?.categoryId ?? 0);
+        return {
+          movementId: m.id,
+          createdAt: m.createdAt,
+          productId: m.productId,
+          productName: product?.name ?? (m.productId === 0 ? "Tedarikci borc odemesi" : "(silinmis urun)"),
+          productCode: product?.code ?? "",
+          type: m.type,
+          qty: m.qty,
+          note: m.note,
+          saleUnit
+        };
+      });
+  }
+
   /** Gelen stok sepeti icin ortak fatura grubu kimligi */
   nextReceiveBatchId(): string {
     const state = this.store.getState();
@@ -664,7 +708,7 @@ export class ProductRepository {
     const supplier = state.suppliers.find((s) => s.id === supplierId);
     if (!supplier) return null;
     const products = state.products
-      .filter((p) => p.supplierId === supplierId && p.isActive === 1)
+      .filter((p) => p.isActive === 1 && productHasSupplier(p, supplierId))
       .map((p) => ({
         productId: p.id,
         productName: p.name,

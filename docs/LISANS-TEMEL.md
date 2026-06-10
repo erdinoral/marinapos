@@ -34,8 +34,10 @@ Tum uygulamalar **ayni tabloya** bakar; `app_code` karistirmaz.
 4. Lisans modulunu kopyala: `licenseService`, `licenseSupabase`, `licenseApp`, `LicenseLockScreen`, electron `licenseRuntime`
 5. `npm run pack` oncesi `build/supabase-license.json` (url, anonKey, appCode)
 
-JSON dosya lisansi (`license-registry.url`) istege bagli yedek; **ana yol Supabase.**
-
 ## Global kapatma
 
 `pos_license_config` → `global_lock = true` → tum uygulamalar (internet varken) kapanir.
+
+## JSON yedek (istege bagli)
+
+Ana yol Supabase. Eski veya yedek model: `license-registry.example.json` → HTTPS uzerinden yayinlayin; kurulumda `build/license-registry.url` (tek satir raw URL) veya `MARINA_LICENSE_URL` ortam degiskeni. Gelistirmede URL yoksa veya `MARINA_SKIP_LICENSE=1` ise kilit devre disi.

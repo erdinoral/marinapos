@@ -17,25 +17,31 @@ import {
   SaleWithLines,
   TopSellingProduct
 } from "../../types/models";
-import { formatTry, formatTlTable, formatTlWhole, parseTrAmount, parseTrAmountWhole, parseTlDecimal, tlToKurus } from "../../utils/currency";
+import { formatTry, formatTl, formatTlTable, formatTlWhole, parseTrAmount, parseTrAmountWhole, parseTlDecimal, tlToKurus } from "../../utils/currency";
 import { SaleInvoiceModal } from "../invoice/SaleInvoiceModal";
 import { invoiceInfoFromCustomer } from "../../utils/invoiceFromCustomer";
 import { canCreateInvoiceForSale } from "../../utils/invoiceFromSale";
 import { isEditableKeyboardTarget } from "../../utils/isEditableTarget";
 import { saleCollectedKurus, saleKindListLabel } from "../../utils/saleCollected";
+import { formatSaleTime } from "../../utils/saleFormat";
+import { buildReturnCartLinesFromSale } from "../../utils/saleReturnCart";
+import { saleMatchesCatalogFilter, type SaleCatalogUnitFilter } from "../../utils/saleListFilter";
 import {
   categorySaleUnitOf,
   defaultGramQtyForCart,
   formatQtyShort,
-  gramsFromLineTotalTl,
+  formatGramCartQtyDisplay,
+  gramsFromWholeLineTotalTl,
   gramPriceKurusMigrate,
   kurusPerGramToTlPer1000g,
+  normalizeGramCartQty,
   normalizeGramQty,
   tlPer1000gToKurusPerGram,
   wholesalePricePlaceholder
 } from "../../utils/saleUnit";
 import {
   CartPriceSource,
+  convertCartItemsPriceMode,
   effectiveTlPer1000gForLine,
   effectiveUnitKurusForLine,
   formatPosUnitPrice,
@@ -43,6 +49,7 @@ import {
   lineTotalKurusForCart,
   lineTotalTlForCart,
   newLineFromProduct,
+  recalcGramQtyFromFixedTl,
   PosCartLine
 } from "./posCartLine";
 import { customerAddKindLabel } from "../../utils/customerLabels";
@@ -60,7 +67,10 @@ import { PosCartCustomerSelect } from "./PosCartCustomerSelect";
 import { ProductStockBadge } from "./ProductStockBadge";
 import { CustomersPanel } from "../customers/CustomersPanel";
 import { ReceiveStockModal } from "../stock/ReceiveStockModal";
+import { ProductSuppliersField } from "../products/ProductSuppliersField";
+import { normalizeAlternateSupplierIds } from "../../utils/productSuppliers";
 import { StockAdjustModal } from "../stock/StockAdjustModal";
+import { SaleDetailDialog } from "../sales/SaleDetailDialog";
 
 interface Props {
   products: Product[];
@@ -69,6 +79,8 @@ interface Props {
   lowStockThreshold: number;
   onSaleCompleted: () => Promise<void>;
   onDataRefresh?: () => void | Promise<void>;
+  pendingReturnSaleId?: number | null;
+  onPendingReturnHandled?: () => void;
 }
 
 function saleUnitFor(categories: Category[], product: Pick<Product, "categoryId">) {
@@ -76,7 +88,7 @@ function saleUnitFor(categories: Category[], product: Pick<Product, "categoryId"
 }
 
 function qtyExceedsStock(qty: number, stockQty: number, unit: CategorySaleUnit): boolean {
-  if (unit === "gram") return normalizeGramQty(qty) > Math.max(0, Math.round(stockQty));
+  if (unit === "gram") return normalizeGramCartQty(qty) > Math.max(0, stockQty);
   return qty > stockQty + 1e-9;
 }
 
@@ -118,43 +130,14 @@ function resolveImageSrc(imagePath: string) {
   return raw;
 }
 
-function formatSaleTime(iso: string) {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso.slice(11, 16);
-  return d.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" });
-}
-
 function maskCiroAmount(reveal: boolean, formatted: string) {
   return reveal ? formatted : "***";
 }
 
-type PosCatalogUnitFilter = "all" | CategorySaleUnit;
-
-function saleMatchesCatalogFilter(
-  saleId: number,
-  productIdsBySale: Record<number, number[]>,
-  products: Product[],
-  categories: Category[],
-  unitFilter: PosCatalogUnitFilter,
-  categoryId: number
-): boolean {
-  if (unitFilter === "all" && categoryId === 0) return true;
-  const lineProductIds = productIdsBySale[saleId] ?? [];
-  return lineProductIds.some((pid) => {
-    const p = products.find((x) => x.id === pid);
-    if (!p) return false;
-    const cat = categories.find((c) => c.id === p.categoryId);
-    const unit: CategorySaleUnit = cat?.saleUnit === "gram" ? "gram" : "piece";
-    if (unitFilter !== "all" && unit !== unitFilter) return false;
-    if (categoryId !== 0 && p.categoryId !== categoryId) return false;
-    return true;
-  });
-}
-
-/** Gram satir: satilan miktar (tam sayi g) */
+/** Gram satir: satilan miktar (g); kusuratli olabilir */
 function CartGramQtyField({ qty, onCommit }: { qty: number; onCommit: (grams: number) => void }) {
   const [draft, setDraft] = useState<string | null>(null);
-  const committed = String(Math.max(1, Math.round(qty)));
+  const committed = qty > 0 ? formatGramCartQtyDisplay(qty) : "";
   const value = draft !== null ? draft : committed;
 
   return (
@@ -162,16 +145,16 @@ function CartGramQtyField({ qty, onCommit }: { qty: number; onCommit: (grams: nu
       <span className="cart-field-label">Satilan (g)</span>
       <input
         type="text"
-        inputMode="numeric"
+        inputMode="decimal"
         className="cart-field-input"
         placeholder="1000"
-        aria-label="Satilan gram (tam sayi)"
+        aria-label="Satilan gram (kusuratli olabilir)"
         value={value}
-        onChange={(e) => setDraft(e.target.value.replace(/[^\d]/g, ""))}
+        onChange={(e) => setDraft(e.target.value)}
         onBlur={() => {
           if (draft !== null) {
-            const n = Number(draft);
-            if (Number.isFinite(n) && n > 0) onCommit(n);
+            const n = parseTrAmount(draft);
+            if (n != null && n > 0) onCommit(n);
           }
           setDraft(null);
         }}
@@ -283,16 +266,19 @@ function CartUnitPriceField({
   );
 }
 
-/** Gram satir: tutar girilince gram hesaplanir; gram girilince tutar gosterilir */
+/** Gram satir: tutar (tam TL) girilince gram hesaplanir; TL sabit kalir */
 function CartGramSaleTlField({
-  lineTotalTl,
+  fixedWholeTl,
+  derivedTl,
   onCommit
 }: {
-  lineTotalTl: number;
+  fixedWholeTl: number | null;
+  derivedTl: number;
   onCommit: (tlStr: string) => void;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
-  const committed = lineTotalTl > 0 ? formatTlWhole(lineTotalTl) : "";
+  const displayTl = fixedWholeTl ?? (derivedTl > 0 ? Math.round(derivedTl) : 0);
+  const committed = displayTl > 0 ? formatTlWhole(displayTl) : "";
   const value = draft !== null ? draft : committed;
 
   return (
@@ -347,6 +333,7 @@ type EditProductForm = {
   code: string;
   categoryId: number;
   supplierId: number;
+  alternateSupplierIds: number[];
   priceTl: string;
   wholesaleTl: string;
   sellsWholesale: boolean;
@@ -362,13 +349,22 @@ type EditProductForm = {
   imagePath: string;
 };
 
-export function PosScreen({ products, categories, suppliers, lowStockThreshold, onSaleCompleted, onDataRefresh }: Props) {
+export function PosScreen({
+  products,
+  categories,
+  suppliers,
+  lowStockThreshold,
+  onSaleCompleted,
+  onDataRefresh,
+  pendingReturnSaleId,
+  onPendingReturnHandled
+}: Props) {
   const [posPane, setPosPane] = useState<PosPane>("main");
   const [today, setToday] = useState(() => new Date().toISOString().slice(0, 10));
   const [search, setSearch] = useState("");
   const [topSellersOpen, setTopSellersOpen] = useState(false);
   /** Once adet / gramajli; sonra kategori chip */
-  const [posSaleUnitFilter, setPosSaleUnitFilter] = useState<PosCatalogUnitFilter>("all");
+  const [posSaleUnitFilter, setPosSaleUnitFilter] = useState<SaleCatalogUnitFilter>("all");
   const [posCategoryFilter, setPosCategoryFilter] = useState(0);
   const [customerSearch, setCustomerSearch] = useState("");
   const [addCustomerKind, setAddCustomerKind] = useState<CustomerKind>("wholesale");
@@ -426,7 +422,7 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
   const [todayListPayment, setTodayListPayment] = useState<"all" | PaymentType>("all");
   /** Bos: tumu; "none": musterisiz; sayi stringi: musteri id */
   const [todayListCustomerKey, setTodayListCustomerKey] = useState<string>("");
-  const [todayListSaleUnitFilter, setTodayListSaleUnitFilter] = useState<PosCatalogUnitFilter>("all");
+  const [todayListSaleUnitFilter, setTodayListSaleUnitFilter] = useState<SaleCatalogUnitFilter>("all");
   const [todayListCategoryId, setTodayListCategoryId] = useState(0);
   const [todayListQuery, setTodayListQuery] = useState("");
   const [todayListSort, setTodayListSort] = useState<"time_desc" | "time_asc" | "amount_desc" | "amount_asc">("time_desc");
@@ -590,7 +586,7 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
         if (!matchesId && !matchesCart) return false;
       }
       if (
-        sale.kind !== "debt_payment" &&
+        sale.kind === "sale" &&
         !saleMatchesCatalogFilter(
           sale.id,
           dailySaleProductIds,
@@ -747,8 +743,11 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
   }, [refreshCustomers]);
 
   useEffect(() => {
-    if (posPane === "ledger") void refreshCustomers();
-  }, [posPane, refreshCustomers]);
+    if (posPane === "ledger") {
+      void refreshCustomers();
+      void onDataRefresh?.();
+    }
+  }, [posPane, refreshCustomers, onDataRefresh]);
 
   useEffect(() => {
     if (!selectedPosCustomerId) {
@@ -955,6 +954,37 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
   /** Satista odeme Kart seciliyken urun kartindaki kart fiyati (alternatePriceKurus) taban olur */
   const applyCardListPrice = useMemo(() => saleKind === "sale" && paymentType === "card", [saleKind, paymentType]);
 
+  const applyCartPriceMode = useCallback(
+    (mode: "retail" | "wholesale") => {
+      if (cartPriceMode === mode) return;
+      setCartPriceMode(mode);
+      setCarts((prev) =>
+        prev.map((cartRow) => {
+          if (cartRow.id !== activeCartId || cartRow.items.length === 0) return cartRow;
+          return {
+            ...cartRow,
+            items: convertCartItemsPriceMode(
+              cartRow.items,
+              mode,
+              categories,
+              customerCustomPricesByProduct,
+              customerLineDiscPct,
+              applyCardListPrice
+            )
+          };
+        })
+      );
+    },
+    [
+      activeCartId,
+      applyCardListPrice,
+      cartPriceMode,
+      categories,
+      customerCustomPricesByProduct,
+      customerLineDiscPct
+    ]
+  );
+
   const linesTotalKurus = useMemo(
     () => cart.reduce((sum, item) => sum + lineTotalKurusForCart(item, categories, customerLineDiscPct, applyCardListPrice), 0),
     [cart, categories, customerLineDiscPct, applyCardListPrice]
@@ -1109,7 +1139,7 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
     const product = products.find((p) => p.id === productId);
     if (!product) return;
     if (!Number.isFinite(value)) return;
-    const next = normalizeGramQty(value);
+    const next = normalizeGramCartQty(value);
     setCarts((prev) =>
       prev.map((cartRow) =>
         cartRow.id !== activeCartId
@@ -1117,7 +1147,11 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
           : {
               ...cartRow,
               items: cartRow.items
-                .map((item) => (item.id === productId && item.priceSource === priceSource ? { ...item, qty: next } : item))
+                .map((item) =>
+                  item.id === productId && item.priceSource === priceSource
+                    ? { ...item, qty: next, manualLineTotalTlWhole: null }
+                    : item
+                )
                 .filter((item) => item.qty > 0)
             }
       )
@@ -1127,7 +1161,22 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
   const setGramLineTotalFromTl = (productId: number, priceSource: CartPriceSource, tlStr: string) => {
     const trimmed = String(tlStr).trim();
     if (trimmed === "") {
-      setGramQtyFromInput(productId, priceSource, 0);
+      setCarts((prev) =>
+        prev.map((cartRow) =>
+          cartRow.id !== activeCartId
+            ? cartRow
+            : {
+                ...cartRow,
+                items: cartRow.items
+                  .map((item) =>
+                    item.id === productId && item.priceSource === priceSource
+                      ? { ...item, qty: 0, manualLineTotalTlWhole: null }
+                      : item
+                  )
+                  .filter((item) => item.qty > 0)
+              }
+        )
+      );
       return;
     }
     const product = products.find((p) => p.id === productId);
@@ -1139,17 +1188,32 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
       window.alert("Birim fiyat sifir; tutardan gram hesaplanamadi.");
       return;
     }
-    const totalTl = parseTrAmountWhole(trimmed);
-    if (totalTl == null || totalTl <= 0) {
+    const totalTlWhole = parseTrAmountWhole(trimmed);
+    if (totalTlWhole == null || totalTlWhole <= 0) {
       setGramQtyFromInput(productId, priceSource, 0);
       return;
     }
-    const rawGrams = gramsFromLineTotalTl(totalTl, tlPer1000);
+    const rawGrams = gramsFromWholeLineTotalTl(totalTlWhole, tlPer1000);
     if (rawGrams == null) {
       setGramQtyFromInput(productId, priceSource, 0);
       return;
     }
-    setGramQtyFromInput(productId, priceSource, rawGrams);
+    setCarts((prev) =>
+      prev.map((cartRow) =>
+        cartRow.id !== activeCartId
+          ? cartRow
+          : {
+              ...cartRow,
+              items: cartRow.items
+                .map((item) =>
+                  item.id === productId && item.priceSource === priceSource
+                    ? { ...item, qty: rawGrams, manualLineTotalTlWhole: totalTlWhole }
+                    : item
+                )
+                .filter((item) => item.qty > 0)
+            }
+      )
+    );
   };
 
   const setLineManualPriceTl = (productId: number, priceSource: CartPriceSource, tlStr: string) => {
@@ -1182,11 +1246,19 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
           ? cartRow
           : {
               ...cartRow,
-              items: cartRow.items.map((item) =>
-                item.id === productId && item.priceSource === priceSource
-                  ? { ...item, manualUnitPriceKurus: kurus != null && kurus > 0 ? kurus : null }
-                  : item
-              )
+              items: cartRow.items.map((item) => {
+                if (item.id !== productId || item.priceSource !== priceSource) return item;
+                const next = { ...item, manualUnitPriceKurus: kurus != null && kurus > 0 ? kurus : null };
+                if (
+                  unit === "gram" &&
+                  next.manualLineTotalTlWhole != null &&
+                  next.manualLineTotalTlWhole > 0
+                ) {
+                  const grams = recalcGramQtyFromFixedTl(next, next.manualLineTotalTlWhole, customerLineDiscPct, applyCardListPrice);
+                  if (grams != null) next.qty = grams;
+                }
+                return next;
+              })
             }
       )
     );
@@ -1200,9 +1272,15 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
           ? cartRow
           : {
               ...cartRow,
-              items: cartRow.items.map((item) =>
-                item.id === productId && item.priceSource === priceSource ? { ...item, lineExtraDiscountPercent: d } : item
-              )
+              items: cartRow.items.map((item) => {
+                if (item.id !== productId || item.priceSource !== priceSource) return item;
+                const next = { ...item, lineExtraDiscountPercent: d };
+                if (next.manualLineTotalTlWhole != null && next.manualLineTotalTlWhole > 0) {
+                  const grams = recalcGramQtyFromFixedTl(next, next.manualLineTotalTlWhole, customerLineDiscPct, applyCardListPrice);
+                  if (grams != null) next.qty = grams;
+                }
+                return next;
+              })
             }
       )
     );
@@ -1243,8 +1321,8 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
         return;
       }
       if (unit === "gram") {
-        if (!Number.isFinite(ln.qty) || normalizeGramQty(ln.qty) < 1) {
-          window.alert(`Gramajli "${ln.name}" icin satilan gram en az 1 olmalidir (tam sayi).`);
+        if (!Number.isFinite(ln.qty) || normalizeGramCartQty(ln.qty) < 0.01) {
+          window.alert(`Gramajli "${ln.name}" icin satilan gram en az 0,01 olmalidir.`);
           return;
         }
       } else if (!Number.isFinite(ln.qty) || ln.qty < 1 || !Number.isInteger(ln.qty)) {
@@ -1481,35 +1559,42 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
 
   const openEditModal = (product: Product) => {
     setProductContext(null);
-    setEditProduct(product);
-    const editUnit = categorySaleUnitOf(categories, product.categoryId);
-    setEditForm({
-      name: product.name ?? "",
-      description: product.description ?? "",
-      barcode: product.barcode ?? "",
-      code: product.code ?? "",
-      categoryId: product.categoryId ?? 0,
-      supplierId: product.supplierId ?? 0,
-      priceTl: (editUnit === "gram" ? kurusPerGramToTlPer1000g(product.priceKurus) : product.priceKurus / 100).toFixed(2),
-      sellsWholesale: product.wholesalePriceKurus > 0,
+    void (async () => {
+      const api = getMarinaApi();
+      const fresh =
+        typeof api.getProductById === "function" ? await api.getProductById(product.id) : null;
+      const row = fresh ?? product;
+      setEditProduct(row);
+      const editUnit = categorySaleUnitOf(categories, row.categoryId);
+      setEditForm({
+      name: row.name ?? "",
+      description: row.description ?? "",
+      barcode: row.barcode ?? "",
+      code: row.code ?? "",
+      categoryId: row.categoryId ?? 0,
+      supplierId: row.supplierId ?? 0,
+      alternateSupplierIds: [...(row.alternateSupplierIds ?? [])],
+      priceTl: (editUnit === "gram" ? kurusPerGramToTlPer1000g(row.priceKurus) : row.priceKurus / 100).toFixed(2),
+      sellsWholesale: row.wholesalePriceKurus > 0,
       wholesaleTl:
-        product.wholesalePriceKurus > 0
-          ? (editUnit === "gram" ? kurusPerGramToTlPer1000g(product.wholesalePriceKurus) : product.wholesalePriceKurus / 100).toFixed(2)
+        row.wholesalePriceKurus > 0
+          ? (editUnit === "gram" ? kurusPerGramToTlPer1000g(row.wholesalePriceKurus) : row.wholesalePriceKurus / 100).toFixed(2)
           : "",
       alternateTl:
-        product.alternatePriceKurus > 0
-          ? (editUnit === "gram" ? kurusPerGramToTlPer1000g(product.alternatePriceKurus) : product.alternatePriceKurus / 100).toFixed(2)
+        row.alternatePriceKurus > 0
+          ? (editUnit === "gram" ? kurusPerGramToTlPer1000g(row.alternatePriceKurus) : row.alternatePriceKurus / 100).toFixed(2)
           : "",
-      posFavorite: product.posFavorite === 1,
-      discountPercent: String(product.discountPercent ?? 0),
-      costTl: (editUnit === "gram" ? kurusPerGramToTlPer1000g(product.costPriceKurus) : product.costPriceKurus / 100).toFixed(2),
-      stockQty: String(Math.round(product.stockQty ?? 0)),
-      material: product.material ?? "",
-      vatRatePercent: String(product.vatRatePercent ?? 20),
-      priceIncludesVat: product.priceIncludesVat !== false,
-      domesticMade: product.domesticMade === true,
-      imagePath: product.imagePath ?? ""
-    });
+      posFavorite: row.posFavorite === 1,
+      discountPercent: String(row.discountPercent ?? 0),
+      costTl: (editUnit === "gram" ? kurusPerGramToTlPer1000g(row.costPriceKurus) : row.costPriceKurus / 100).toFixed(2),
+      stockQty: String(Math.round(row.stockQty ?? 0)),
+      material: row.material ?? "",
+      vatRatePercent: String(row.vatRatePercent ?? 20),
+      priceIncludesVat: row.priceIncludesVat !== false,
+      domesticMade: row.domesticMade === true,
+      imagePath: row.imagePath ?? ""
+      });
+    })();
   };
 
   const pickEditImage = async () => {
@@ -1537,13 +1622,20 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
     if (!Number.isFinite(stockQty) || stockQty < 0) return;
     const savedStockQty = editUnit === "gram" ? Math.round(stockQty) : stockQty;
     if (!Number.isFinite(vatRatePercent) || vatRatePercent < 0 || vatRatePercent > 100) return;
+    const supplierId = Math.max(0, Math.floor(Number(editForm.supplierId || 0)));
+    const alternateSupplierIds = normalizeAlternateSupplierIds(
+      editForm.alternateSupplierIds ?? [],
+      supplierId
+    );
+    try {
     await getMarinaApi().updateProduct(editProduct.id, {
       name: nameTrim,
       description: editForm.description.trim(),
       barcode,
       code,
       categoryId: Math.max(0, Math.floor(Number(editForm.categoryId || 0))),
-      supplierId: Math.max(0, Math.floor(Number(editForm.supplierId || 0))),
+      supplierId,
+      alternateSupplierIds,
       priceKurus: editUnit === "gram" ? tlPer1000gToKurusPerGram(priceTl) : tlToKurus(priceTl),
       wholesalePriceKurus:
         editForm.sellsWholesale && Number.isFinite(wholesaleTl) && wholesaleTl > 0
@@ -1570,6 +1662,10 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
     setEditProduct(null);
     setEditForm(null);
     await onSaleCompleted();
+    await onDataRefresh?.();
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : "Urun kaydedilemedi.");
+    }
   };
 
   const openInvoicePreview = async () => {
@@ -1631,9 +1727,7 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
   );
 
   const openSaleDetail = async (saleId: number) => {
-    const api = getMarinaApi();
-    if (typeof api.getSaleWithLines !== "function") return;
-    const row = await api.getSaleWithLines(saleId);
+    const row = await getMarinaApi().getSaleWithLines(saleId);
     if (row) setDetailOpen(row);
   };
 
@@ -1663,45 +1757,63 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
     setSaleInvoiceOpen(detailOpen);
   };
 
+  const applyReturnLinesToCart = useCallback(
+    (detail: SaleWithLines, lines: PosCartLine[]) => {
+      setCarts((prev) => prev.map((c) => (c.id === activeCartId ? { ...c, items: lines } : c)));
+      setSaleKind("return");
+      setPaymentType(detail.sale.paymentType);
+      setPaidAmountTl("");
+      setDetailOpen(null);
+      setPosPane("main");
+    },
+    [activeCartId]
+  );
+
+  const loadReturnCartLines = useCallback(
+    async (detail: SaleWithLines) => {
+      const api = getMarinaApi();
+      const { lines, missing } = await buildReturnCartLinesFromSale(detail, products, (id) => api.getProductById(id));
+      if (missing.length > 0) {
+        window.alert(`Urun bulunamadi:\n${missing.join("\n")}`);
+      }
+      if (lines.length === 0) {
+        window.alert("Sepete alinacak satir kalmadi.");
+        return null;
+      }
+      return lines;
+    },
+    [products]
+  );
+
   const applyReturnFromDetail = async () => {
     if (!detailOpen || detailOpen.sale.kind !== "sale") return;
     if (cart.length > 0 && !window.confirm("Sepetteki urunler silinsin ve bu satis iade sepetine alinsin mi?")) {
       return;
     }
-    const api = getMarinaApi();
-    const lines: PosCartLine[] = [];
-    for (const ln of detailOpen.items) {
-      if (ln.productId < 0 || (ln.productName ?? "").includes("Kart (Ozel)")) continue;
-      let p: Product | null = products.find((x) => x.id === ln.productId) ?? null;
-      if (!p && typeof api.getProductById === "function") {
-        p = await api.getProductById(ln.productId);
-      }
-      if (!p) {
-        window.alert(`Urun bulunamadi (ID ${ln.productId}): ${ln.productName}`);
-        continue;
-      }
-      const qty = Math.abs(Number(ln.qty));
-      const unit = Math.max(0, Math.round(Number(ln.unitPriceKurus)));
-      lines.push({
-        ...p,
-        qty,
-        priceSource: "retail",
-        manualUnitPriceKurus: unit,
-        manualUnitCostKurus: null,
-        lineExtraDiscountPercent: 0
-      });
-    }
-    if (lines.length === 0) {
-      window.alert("Sepete alinacak satir kalmadi.");
-      return;
-    }
-    setCarts((prev) => prev.map((c) => (c.id === activeCartId ? { ...c, items: lines } : c)));
-    setSaleKind("return");
-    setPaymentType(detailOpen.sale.paymentType);
-    setPaidAmountTl("");
-    setDetailOpen(null);
-    setPosPane("main");
+    const lines = await loadReturnCartLines(detailOpen);
+    if (lines) applyReturnLinesToCart(detailOpen, lines);
   };
+
+  useEffect(() => {
+    if (pendingReturnSaleId == null) return;
+    const saleId = pendingReturnSaleId;
+    onPendingReturnHandled?.();
+    void (async () => {
+      const detail = await getMarinaApi().getSaleWithLines(saleId);
+      if (!detail || detail.sale.kind !== "sale") {
+        if (detail && detail.sale.kind !== "sale") {
+          window.alert("Bu kayit iade edilemez; orijinal satis secin.");
+        }
+        return;
+      }
+      const cartItems = carts.find((c) => c.id === activeCartId)?.items ?? [];
+      if (cartItems.length > 0 && !window.confirm("Sepetteki urunler silinsin ve bu satis iade sepetine alinsin mi?")) {
+        return;
+      }
+      const lines = await loadReturnCartLines(detail);
+      if (lines) applyReturnLinesToCart(detail, lines);
+    })();
+  }, [pendingReturnSaleId, onPendingReturnHandled, carts, activeCartId, applyReturnLinesToCart, loadReturnCartLines]);
 
   useEffect(() => {
     if (posPane !== "main") return;
@@ -1787,7 +1899,7 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
                       <select
                         value={posSaleUnitFilter}
                         onChange={(e) => {
-                          setPosSaleUnitFilter(e.target.value as PosCatalogUnitFilter);
+                          setPosSaleUnitFilter(e.target.value as SaleCatalogUnitFilter);
                           setPosCategoryFilter(0);
                         }}
                       >
@@ -2017,14 +2129,14 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
               <button
                 type="button"
                 className={cartPriceMode === "retail" ? "active" : ""}
-                onClick={() => setCartPriceMode("retail")}
+                onClick={() => applyCartPriceMode("retail")}
               >
                 Perakende
               </button>
               <button
                 type="button"
                 className={cartPriceMode === "wholesale" ? "active" : ""}
-                onClick={() => setCartPriceMode("wholesale")}
+                onClick={() => applyCartPriceMode("wholesale")}
               >
                 Toptan
               </button>
@@ -2098,7 +2210,8 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
                             }
                           />
                           <CartGramSaleTlField
-                            lineTotalTl={lineTotalTlForCart(item, categories, customerLineDiscPct, applyCardListPrice)}
+                            fixedWholeTl={item.manualLineTotalTlWhole}
+                            derivedTl={lineTotalTlForCart(item, categories, customerLineDiscPct, applyCardListPrice)}
                             onCommit={(tl) => setGramLineTotalFromTl(item.id, item.priceSource, tl)}
                           />
                           <label className="cart-field">
@@ -2116,17 +2229,24 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
                           <div className="cart-field cart-field-total">
                             <span className="cart-field-label">Toplam</span>
                             <span className="cart-line-total">
-                              {`${formatTlWhole(lineTotalTlForCart(item, categories, customerLineDiscPct, applyCardListPrice))} ₺`}
+                              {item.manualLineTotalTlWhole != null && item.manualLineTotalTlWhole > 0
+                                ? `${formatTlWhole(item.manualLineTotalTlWhole)} ₺`
+                                : formatTlTable(lineTotalTlForCart(item, categories, customerLineDiscPct, applyCardListPrice))}
                             </span>
                           </div>
                         </div>
                         {(() => {
                           const birim = effectiveTlPer1000gForLine(item, customerLineDiscPct, applyCardListPrice);
-                          const gram = Math.round(item.qty);
-                          const tutar = lineTotalTlForCart(item, categories, customerLineDiscPct, applyCardListPrice);
+                          const gram = formatGramCartQtyDisplay(item.qty);
+                          const tutar =
+                            item.manualLineTotalTlWhole != null && item.manualLineTotalTlWhole > 0
+                              ? item.manualLineTotalTlWhole
+                              : lineTotalTlForCart(item, categories, customerLineDiscPct, applyCardListPrice);
                           const formula =
-                            birim > 0 && gram > 0
-                              ? `${formatTlWhole(birim)}/kg × ${gram} g ÷ 1000 = ${formatTlWhole(tutar)} TL`
+                            birim > 0 && item.qty > 0
+                              ? item.manualLineTotalTlWhole != null && item.manualLineTotalTlWhole > 0
+                                ? `${formatTlWhole(item.manualLineTotalTlWhole)} TL → ${gram} g`
+                                : `${formatTlWhole(birim).replace(" ₺", "")}/kg × ${gram} g ÷ 1000 = ${formatTlWhole(Math.round(tutar))} TL`
                               : "Gram ve birim fiyat girin; tutar otomatik hesaplanir.";
                           return (
                             <p className="cart-gram-formula-hint muted small">
@@ -2569,7 +2689,7 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
               <select
                 value={todayListSaleUnitFilter}
                 onChange={(e) => {
-                  setTodayListSaleUnitFilter(e.target.value as PosCatalogUnitFilter);
+                  setTodayListSaleUnitFilter(e.target.value as SaleCatalogUnitFilter);
                   setTodayListCategoryId(0);
                 }}
               >
@@ -2676,20 +2796,16 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
                     ))}
                   </select>
                 </label>
-                <label className="settings-field product-edit-field">
-                  <span>Tedarikci</span>
-                  <select
-                    value={editForm.supplierId}
-                    onChange={(e) => setEditForm((prev) => (prev ? { ...prev, supplierId: Number(e.target.value) } : prev))}
-                  >
-                    <option value={0}>Tedarikci yok</option>
-                    {suppliers.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <div className="product-edit-field product-edit-field--suppliers">
+                  <ProductSuppliersField
+                    suppliers={suppliers}
+                    primarySupplierId={editForm.supplierId}
+                    alternateSupplierIds={editForm.alternateSupplierIds}
+                    onChange={(supplierId, alternateSupplierIds) =>
+                      setEditForm((prev) => (prev ? { ...prev, supplierId, alternateSupplierIds } : prev))
+                    }
+                  />
+                </div>
                 <label className="settings-field product-edit-field">
                   <span>Barkod</span>
                   <input
@@ -2991,108 +3107,15 @@ export function PosScreen({ products, categories, suppliers, lowStockThreshold, 
         />
       ) : null}
 
-      {detailOpen && (
-        <div className="settings-log-overlay" onClick={() => setDetailOpen(null)} role="dialog" aria-modal="true">
-          <div className="settings-log-dialog sale-detail-dialog" onClick={(e) => e.stopPropagation()}>
-            <div className="settings-card-head">
-              <h3>
-                Islem #{detailOpen.sale.id} · {saleKindListLabel(detailOpen.sale.kind)}
-              </h3>
-              <button type="button" onClick={() => setDetailOpen(null)}>
-                Kapat
-              </button>
-            </div>
-            <p className="sale-detail-meta">
-              {formatSaleTime(detailOpen.sale.createdAt)} · {detailOpen.sale.paymentType === "cash" ? "Nakit" : "Kart"} · Sepet:{" "}
-              {detailOpen.sale.cartName || "Sepet 1"}
-              {detailOpen.sale.customerId ? (
-                <>
-                  {" "}
-                  · Musteri: {customers.find((c) => c.id === detailOpen.sale.customerId)?.name ?? `#${detailOpen.sale.customerId}`}
-                </>
-              ) : null}
-            </p>
-            {detailOpen.sale.kind === "debt_payment" ? (
-              <>
-                <p className="sale-detail-meta">
-                  Musteri borcu tahsilati — kasaya giren:{" "}
-                  <strong className="sales-amount">{formatTry(saleCollectedKurus(detailOpen.sale))}</strong>
-                </p>
-                {detailOpen.sale.paymentNote?.trim() ? (
-                  <p className="sale-detail-meta muted small">Not: {detailOpen.sale.paymentNote.trim()}</p>
-                ) : null}
-              </>
-            ) : (
-              <div className="sale-detail-table-wrap">
-                <table className="sale-detail-table">
-                  <thead>
-                    <tr>
-                      <th>Kod</th>
-                      <th>Urun</th>
-                      <th className="r">Miktar</th>
-                      <th className="r">Birim</th>
-                      <th className="r">Tutar</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detailOpen.items.map((ln) => (
-                      <tr key={ln.saleItemId ?? `${ln.productId}-${ln.qty}-${ln.unitPriceKurus}`}>
-                        <td className="sale-detail-code">{ln.productCode || "—"}</td>
-                        <td>{ln.productName}</td>
-                        <td className="r">{formatQtyShort(ln.qty, ln.saleUnit)}</td>
-                        <td className="r">
-                          {formatPosUnitPrice(
-                            ln.unitPriceKurus,
-                            categories,
-                            products.find((p) => p.id === ln.productId)?.categoryId ?? 0
-                          )}
-                        </td>
-                        <td className="r sales-amount">{formatTry(ln.lineTotalKurus)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            <p className="sale-detail-total">
-              <strong>
-                {detailOpen.sale.kind === "debt_payment"
-                  ? `Tahsilat: ${formatTry(saleCollectedKurus(detailOpen.sale))}`
-                  : `Toplam: ${formatTry(detailOpen.sale.subtotalKurus)}`}
-              </strong>
-              {(detailOpen.sale.debtPaidKurus ?? 0) > 0 && detailOpen.sale.kind === "sale" ? (
-                <span className="sale-detail-debt"> · Borca odeme: {formatTry(detailOpen.sale.debtPaidKurus!)}</span>
-              ) : null}
-              {detailOpen.sale.kind === "sale" && detailOpen.sale.paymentType === "cash" ? (
-                <>
-                  {" "}
-                  · Alinan: {formatTry(detailOpen.sale.paidAmountKurus)}
-                  {(detailOpen.sale.debtAddedKurus ?? 0) > 0 ? (
-                    <span className="sale-detail-debt"> · Borc eklendi: {formatTry(detailOpen.sale.debtAddedKurus!)}</span>
-                  ) : null}
-                  {detailOpen.sale.changeAmountKurus > 0 ? (
-                    <> · Para ustu: {formatTry(detailOpen.sale.changeAmountKurus)}</>
-                  ) : null}
-                </>
-              ) : null}
-            </p>
-            <div className="sale-detail-actions">
-              {canCreateInvoiceForSale(detailOpen.sale) ? (
-                <button type="button" className="invoice-btn" onClick={() => openInvoiceFromSaleDetail()}>
-                  Fatura olustur
-                </button>
-              ) : null}
-              {detailOpen.sale.kind === "sale" ? (
-                <button type="button" className="sale-detail-return-btn" onClick={() => void applyReturnFromDetail()}>
-                  Iade icin sepete al (Satis sekmesi)
-                </button>
-              ) : (
-                <p className="sale-detail-return-hint">Bu kayit zaten iade; yeni iade icin orijinal satisi secin.</p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <SaleDetailDialog
+        detail={detailOpen}
+        customers={customers}
+        products={products}
+        categories={categories}
+        onClose={() => setDetailOpen(null)}
+        onInvoice={openInvoiceFromSaleDetail}
+        onApplyReturn={detailOpen?.sale.kind === "sale" ? () => void applyReturnFromDetail() : undefined}
+      />
 
       {productContext ? (
         <ul

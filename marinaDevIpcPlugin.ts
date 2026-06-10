@@ -207,6 +207,8 @@ function dispatch(db: DatabaseService, logs: ErrorLogService, channel: string, a
       return db.products.lowStock();
     case "products:stock-entry-log":
       return db.products.listStockEntryLog();
+    case "products:stock-movement-log":
+      return db.products.listStockMovementLog();
     case "products:delete-stock-entry":
       db.products.deleteStockEntry(Number(args[0]));
       return undefined;
@@ -287,6 +289,8 @@ function dispatch(db: DatabaseService, logs: ErrorLogService, channel: string, a
       return db.sales.getByDate(String(args[0] ?? ""));
     case "sales:daily-product-ids":
       return db.sales.getProductIdsBySaleForDate(String(args[0] ?? ""));
+    case "sales:history":
+      return db.sales.listSalesHistory(Number(args[0] ?? 0));
     case "sales:detail":
       return db.sales.getSaleWithLines(Number(args[0]));
     case "sales:recent-detail":
@@ -376,6 +380,8 @@ function dispatch(db: DatabaseService, logs: ErrorLogService, channel: string, a
       return db.settings.setClosureTime(String(args[0] ?? ""));
     case "settings:set-company-info":
       return db.settings.setCompanyInfo((args[0] ?? {}) as object);
+    case "settings:backup-stats":
+      return db.getBackupModuleStats();
     case "settings:create-backup":
       return db.createBackup((args[0] ?? []) as import("./src/db/backupModules").BackupModuleId[]);
     case "settings:list-backups":

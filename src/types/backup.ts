@@ -33,7 +33,7 @@ export const BACKUP_MODULE_LABELS: Record<
   },
   sales: {
     title: "Satislar ve satis gecmisi",
-    description: "Fisler ve satis satirlari"
+    description: "Tum fisler: Sepet 1/2, musterili ve musterisiz satislar, iade, borc odemesi ve satir detaylari"
   },
   stock: {
     title: "Stok hareketleri",
@@ -72,4 +72,11 @@ export interface BackupInspectResult {
   createdAt: string | null;
   available: BackupModuleSelection;
   present: BackupModuleSelection;
+}
+
+export type BackupModuleStats = Record<BackupModuleId, number>;
+
+export function formatBackupModuleCount(id: BackupModuleId, count: number): string {
+  if (id === "settings") return count > 0 ? "Kayitli" : "Bos";
+  return `${count} kayit`;
 }
