@@ -8,6 +8,7 @@ Thumbs.db
 .vscode/
 reports/
 data/
+release-notes.md
 release/
 release-build/
 release-opt/
