@@ -1668,6 +1668,32 @@ export function PosScreen({
     }
   };
 
+  const deleteProductEdit = async () => {
+    if (!editProduct) return;
+    if (
+      !window.confirm(
+        `"${editProduct.name}" urunu silinsin mi?\n\nUrun satis ve stok listelerinden kaldirilir; gecmis kayitlarda urun adi korunur.`
+      )
+    ) {
+      return;
+    }
+    try {
+      await getMarinaApi().deleteProduct(editProduct.id);
+      setCarts((prev) =>
+        prev.map((c) => ({
+          ...c,
+          items: c.items.filter((item) => item.id !== editProduct.id)
+        }))
+      );
+      setEditProduct(null);
+      setEditForm(null);
+      await onSaleCompleted();
+      await onDataRefresh?.();
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : "Urun silinemedi.");
+    }
+  };
+
   const openInvoicePreview = async () => {
     if (!cart.length) return;
     setInvoiceLoading(true);
@@ -3029,19 +3055,24 @@ export function PosScreen({
                 </div>
               </div>
             )}
-            <div className="modal-actions">
-              <button
-                type="button"
-                onClick={() => {
-                  setEditProduct(null);
-                  setEditForm(null);
-                }}
-              >
-                Vazgec
+            <div className="modal-actions product-edit-modal-actions">
+              <button type="button" className="product-edit-delete-btn" onClick={() => void deleteProductEdit()}>
+                Urunu sil
               </button>
-              <button type="button" className="primary" onClick={() => void saveProductEdit()}>
-                Kaydet
-              </button>
+              <div className="product-edit-modal-actions-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditProduct(null);
+                    setEditForm(null);
+                  }}
+                >
+                  Vazgec
+                </button>
+                <button type="button" className="primary" onClick={() => void saveProductEdit()}>
+                  Kaydet
+                </button>
+              </div>
             </div>
           </div>
         </div>

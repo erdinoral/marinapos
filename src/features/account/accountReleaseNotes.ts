@@ -1,69 +1,71 @@
-export const APP_VERSION = "1.8.4";
+export const APP_VERSION = "1.8.5";
 export const APP_RELEASE_DATE = "11 Haziran 2026";
 
 /** Hesap → Surumler ekraninda kartlar */
 export const APP_RELEASE_NOTES: { title: string; body: string }[] = [
   {
-    title: "Coklu tedarikci",
+    title: "Toplu fatura taslak",
     body:
-      "Urun kartinda birincil tedarikci + ek tedarikci (+). Toplu faturada urun bagli tum firmalarda listelenir; tekli stok girisinde yalnizca karttaki tedarikciler secilir."
+      "Yarim kalan toplu fatura listesi kaybolmaz; baska sekmeye gecip donunce devam edin. Listeyi temizle ile sifirlayin."
   },
   {
-    title: "AI Asistan paneli",
+    title: "Toplu fatura odeme",
     body:
-      "Sag kenarda burger menusu ve AI Asistan etiketi; tiklayinca yan panel acilir. Sohbet tum ekranlarda erisilebilir."
+      "Fatura altinda odenen tutar girilir; fark otomatik tedarikci borcuna yazilir. Urun satirindaki kalan borc alani kaldirildi."
   },
   {
-    title: "Stok listesi ozeti",
+    title: "Toplu fatura liste",
     body:
-      "Stok listesinde maliyet / ciro ozeti altta sabit kalir; yalnizca urun listesi kayar."
+      "Acilir detay kaldirildi; her satirda +5/+10 ve Sil butonu. Listeyi temizle altta solda."
   },
   {
-    title: "Urun duzenle arayuzu",
+    title: "Urunu sil",
     body:
-      "Urun duzenle penceresindeki acilir listeler ve butonlar koyu temaya uyumlu hale getirildi."
+      "Urun duzenle penceresinde Urunu sil; urun satis ve stok listelerinden kaldirilir, gecmis kayitlar korunur."
+  },
+  {
+    title: "Coklu tedarikci (1.8.4)",
+    body:
+      "Birincil + ek tedarikci; toplu fatura ve stok girisi karttaki firmalara gore calisir."
+  },
+  {
+    title: "AI Asistan (1.8.4)",
+    body:
+      "Sag kenar burger menusu ve yan panel; tum ekranlarda erisilebilir."
   },
   {
     title: "Satis gecmisi (1.8.3)",
     body:
       "Stok → Gecmis ve analiz → Satis gecmisi; filtreler, detay, fatura ve iade icin sepete alma."
-  },
-  {
-    title: "Moduler yedekleme (1.8.3)",
-    body:
-      "Yedekleme ve geri yuklemede bolum secimi. Eski tam JSON yedekleri desteklenir."
-  },
-  {
-    title: "POS toptan (1.8.2)",
-    body:
-      "Sepette urun varken Toptan secilince satirlar toptan fiyata gecer."
   }
 ];
 
 /** GitHub Release / electron-updater changelog */
-export const RELEASE_CHANGELOG_MD = `## Marina Nargile POS 1.8.4
+export const RELEASE_CHANGELOG_MD = `## Marina Nargile POS 1.8.5
 
 Kurulu uygulamalar **Ayarlar → Guncelleme** uzerinden bu surumu indirebilir. Verileriniz korunur; yine de yayin oncesi yedek almaniz onerilir.
 
 ### Yeni
 
-#### Coklu tedarikci
-- Urun karti: **birincil tedarikci** + **+** ile **ek tedarikci** (Tedarikci 2, 3…)
-- **Toplu fatura:** secilen firmaya bagli urunler listelenir; ayni urun birden fazla tedarikcide tanimliysa her firmada gorunur
-- **Gelen / stok ekle (tekli):** tedarikci listesi yalnizca urun kartindaki firmalardan gelir; stok secilen tedarikciye yazilir
-- Stok listesinde tedarikci: \`Firma A (+1)\` gibi gosterim
+#### Toplu fatura — yarim kalan liste
+- Listeye eklenen urunler **otomatik taslak** olarak saklanir (modal kapatma veya baska sekmeye gecme)
+- **Toplu fatura** butonunda kalem sayisi rozeti; acinca *Yarim kalan liste yuklendi* uyarisi
+- **Listeyi temizle** (altta solda) ile taslak ve liste sifirlanir
+- Fatura **tamamlaninca** taslak otomatik silinir
 
-#### AI Asistan
-- Sag kenar **burger menusu** ve dikey **AI Asistan** etiketi
-- Tiklayinca sagdan acilan **yan panel**; arka plana tiklayarak veya X ile kapanir
+#### Toplu fatura — odenen tutar
+- Alttaki alan **Odenen tutar (TL)** olarak degisti
+- Ornek: fatura 16.500 TL, odenen 11.500 TL → **5.000 TL** tedarikci borcuna yazilir
+- Urun ekleme formundaki kalem borc alani kaldirildi (yalnizca fatura altindaki odenen tutar)
 
-#### Stok listesi
-- Alt ozet (maliyet, tahmini ciro, kar) **sabit**; yalnizca urun listesi kayar
+#### Toplu fatura — liste arayuzu
+- Satir acilir detay kaldirildi
+- Her satirda **+5 / +10** ve **Sil**; adet ve silme tek satirdan
 
 #### Urun duzenle
-- Kategori / tedarikci acilir listeleri ve Kapat / Vazgec butonlari koyu temaya uyumlu
+- **Urunu sil** butonu eklendi (soft delete; sepetten de cikarilir)
 
-### Onceki surumden (1.8.3 ozeti)
-- Satis gecmisi, iade akisi, stok girisi silme, moduler yedekleme
-- POS toptan fiyat, stok ekrani sekmeleri, guncelleme ekrani iyilestirmeleri
+### Onceki surumden (1.8.4 ozeti)
+- Coklu tedarikci, AI Asistan yan paneli, stok listesi sabit ozet
+- Satis gecmisi, moduler yedekleme, POS toptan fiyat
 `;

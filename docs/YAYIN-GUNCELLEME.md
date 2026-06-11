@@ -39,7 +39,7 @@ Repo ayarlari: **Settings → Actions → General → Workflow permissions → R
 
 1. `package.json` → `version`
 2. `src/features/account/accountReleaseNotes.ts` → `APP_VERSION`, `APP_RELEASE_DATE`, `APP_RELEASE_NOTES`, `RELEASE_CHANGELOG_MD`
-3. Tag: `{version}` (ornek `1.8.4`)
+3. Tag: `{version}` (ornek `1.8.5`)
 
 ## Musteriye guncelleme
 
@@ -51,4 +51,4 @@ Repo ayarlari: **Settings → Actions → General → Workflow permissions → R
 | Sorun | Cozum |
 |--------|--------|
 | Guncelleme bulunamadi | Tag ve `latest.yml` release'de mi kontrol edin |
-| `publish` hata | `GH_TOKEN` repo yetkisi; tag adi `1.8.4` formatinda |
+| `publish` hata | `GH_TOKEN` repo yetkisi; tag adi `1.8.5` formatinda |

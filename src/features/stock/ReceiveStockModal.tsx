@@ -7,6 +7,7 @@ import { categorySaleUnitOf, formatQtyShort, incomingCostTlToUnitCostKurus } fro
 import { StockCostFields } from "./StockCostFields";
 import { buildStockAddInput, defaultCostTlForProduct } from "./stockAddHelpers";
 import { productHasSupplier, productSupplierIds } from "../../utils/productSuppliers";
+import { clearBulkInvoiceDraft, loadBulkInvoiceDraft, saveBulkInvoiceDraft } from "./bulkInvoiceDraft";
 import type { ReceiveCartLine, ReceiveStockPrefill } from "./receiveStockTypes";
 
 type Props = {
@@ -19,6 +20,7 @@ type Props = {
   prefill?: ReceiveStockPrefill | null;
   onClose: () => void;
   onSaved: () => void | Promise<void>;
+  onDraftChange?: () => void;
 };
 
 function newCartLineId() {
@@ -42,56 +44,98 @@ function parseQty(raw: number, unit: CategorySaleUnit): number | null {
 
 type LineCostPreview = { lineCost: number; paid: number; debt: number };
 
-/** Liste kalemlerine ek (fatura/form) borcunu son satirdan geriye dagitir. */
-function mergePendingDebtOntoLines(
+/** Fatura odenen tutarina gore kalan borcu kalemlere son satirdan geriye dagitir. */
+function applyInvoicePaidOntoLines(
   lines: ReceiveCartLine[],
-  extraDebtTl: string,
+  invoicePaidTl: string,
   preview: (line: ReceiveCartLine) => LineCostPreview
 ): ReceiveCartLine[] | null {
-  const trimmed = String(extraDebtTl ?? "").trim();
-  if (!trimmed) return lines;
-  const parsed = parseTrAmount(trimmed);
-  if (parsed == null || parsed < 0) {
-    window.alert("Kalan borc (TL) gecersiz.");
+  let totalKurus = 0;
+  for (const line of lines) {
+    totalKurus += preview({ ...line, remainingDebtTl: "" }).lineCost;
+  }
+
+  const trimmed = String(invoicePaidTl ?? "").trim();
+  if (!trimmed) {
+    return lines.map((l) => ({ ...l, remainingDebtTl: "" }));
+  }
+
+  const paidParsed = parseTrAmount(trimmed);
+  if (paidParsed == null || paidParsed < 0) {
+    window.alert("Odenen tutar gecersiz.");
     return null;
   }
-  if (parsed === 0) return lines;
 
-  let leftKurus = tlToKurus(parsed);
-  const result = lines.map((l) => ({ ...l }));
+  const paidKurus = tlToKurus(paidParsed);
+  if (paidKurus > totalKurus) {
+    window.alert("Odenen tutar, fatura toplamindan fazla olamaz.");
+    return null;
+  }
+
+  const debtKurus = totalKurus - paidKurus;
+  if (debtKurus <= 0) {
+    return lines.map((l) => ({ ...l, remainingDebtTl: "" }));
+  }
+
+  let leftKurus = debtKurus;
+  const result = lines.map((l) => ({ ...l, remainingDebtTl: "" }));
 
   for (let i = result.length - 1; i >= 0 && leftKurus > 0; i--) {
     const line = result[i];
-    const summary = preview(line);
-    const room = Math.max(0, summary.lineCost - summary.debt);
+    const summary = preview({ ...line, remainingDebtTl: "" });
+    const room = summary.lineCost;
     if (room <= 0) continue;
     const assign = Math.min(leftKurus, room);
-    const newDebtKurus = summary.debt + assign;
-    result[i] = { ...line, remainingDebtTl: (newDebtKurus / 100).toFixed(2) };
+    result[i] = { ...line, remainingDebtTl: (assign / 100).toFixed(2) };
     leftKurus -= assign;
   }
 
   if (leftKurus > 0) {
-    window.alert("Kalan borc, fatura toplamindan fazla olamaz.");
+    window.alert("Borc dagitimi hesaplanamadi.");
     return null;
   }
   return result;
 }
 
-export function ReceiveStockModal({ products, categories, suppliers, initialProduct, bulkEntry = false, prefill, onClose, onSaved }: Props) {
-  const [supplierId, setSupplierId] = useState(0);
-  const [pickerProductId, setPickerProductId] = useState<number | null>(null);
-  const [productSearch, setProductSearch] = useState("");
+export function ReceiveStockModal({
+  products,
+  categories,
+  suppliers,
+  initialProduct,
+  bulkEntry = false,
+  prefill,
+  onClose,
+  onSaved,
+  onDraftChange
+}: Props) {
+  const bulkDraftOnMount = useMemo(() => (bulkEntry ? loadBulkInvoiceDraft() : null), [bulkEntry]);
+  const [supplierId, setSupplierId] = useState(bulkDraftOnMount?.supplierId ?? 0);
+  const [pickerProductId, setPickerProductId] = useState<number | null>(bulkDraftOnMount?.pickerProductId ?? null);
+  const [productSearch, setProductSearch] = useState(bulkDraftOnMount?.productSearch ?? "");
   const [qty, setQty] = useState(1);
   const [incomingCostTl, setIncomingCostTl] = useState("");
   const [costMode, setCostMode] = useState<StockCostMode>("product");
   const [invoicePaidTl, setInvoicePaidTl] = useState("");
   const [remainingDebtTl, setRemainingDebtTl] = useState("");
-  const [invoiceRemainingDebtTl, setInvoiceRemainingDebtTl] = useState("");
-  const [cart, setCart] = useState<ReceiveCartLine[]>([]);
-  const [expandedCartId, setExpandedCartId] = useState<string | null>(null);
+  const [invoiceTotalPaidTl, setInvoiceTotalPaidTl] = useState(bulkDraftOnMount?.invoicePaidTl ?? "");
+  const [cart, setCart] = useState<ReceiveCartLine[]>(bulkDraftOnMount?.cart ?? []);
+  const [draftBannerVisible, setDraftBannerVisible] = useState(
+    Boolean(bulkDraftOnMount && bulkDraftOnMount.cart.length > 0)
+  );
   const [saving, setSaving] = useState(false);
   const pickListRef = useRef<HTMLUListElement>(null);
+  const cartRef = useRef(cart);
+  const supplierIdRef = useRef(supplierId);
+  const invoiceTotalPaidTlRef = useRef(invoiceTotalPaidTl);
+  const pickerProductIdRef = useRef(pickerProductId);
+  const productSearchRef = useRef(productSearch);
+  const submittedRef = useRef(false);
+
+  cartRef.current = cart;
+  supplierIdRef.current = supplierId;
+  invoiceTotalPaidTlRef.current = invoiceTotalPaidTl;
+  pickerProductIdRef.current = pickerProductId;
+  productSearchRef.current = productSearch;
 
   const activeProducts = useMemo(() => products.filter((p) => p.isActive === 1), [products]);
   const cartProductIds = useMemo(() => new Set(cart.map((l) => l.productId)), [cart]);
@@ -146,6 +190,38 @@ export function ReceiveStockModal({ products, categories, suppliers, initialProd
     },
     [categories]
   );
+
+  const persistBulkDraftIfNeeded = useCallback(() => {
+    if (!bulkEntry || submittedRef.current) return;
+    const lines = cartRef.current;
+    if (lines.length === 0) {
+      clearBulkInvoiceDraft();
+      onDraftChange?.();
+      return;
+    }
+    saveBulkInvoiceDraft({
+      supplierId: supplierIdRef.current,
+      cart: lines,
+      invoicePaidTl: invoiceTotalPaidTlRef.current,
+      pickerProductId: pickerProductIdRef.current,
+      productSearch: productSearchRef.current
+    });
+    onDraftChange?.();
+  }, [bulkEntry, onDraftChange]);
+
+  const handleClose = useCallback(() => {
+    if (saving) return;
+    persistBulkDraftIfNeeded();
+    onClose();
+  }, [saving, persistBulkDraftIfNeeded, onClose]);
+
+  useEffect(() => {
+    if (!bulkEntry || !bulkDraftOnMount?.pickerProductId) return;
+    const p = activeProducts.find((x) => x.id === bulkDraftOnMount.pickerProductId);
+    if (p) resetFormForProduct(p);
+  }, [bulkEntry, bulkDraftOnMount?.pickerProductId, activeProducts, resetFormForProduct]);
+
+  useEffect(() => () => persistBulkDraftIfNeeded(), [persistBulkDraftIfNeeded]);
 
   useEffect(() => {
     const p = initialProduct ?? null;
@@ -224,7 +300,6 @@ export function ReceiveStockModal({ products, categories, suppliers, initialProd
       supplierId: built.sid
     };
     setCart((prev) => [...prev, line]);
-    setExpandedCartId(line.id);
     setQty(unit === "gram" ? 1000 : 1);
     setRemainingDebtTl("");
     requestAnimationFrame(() => {
@@ -235,14 +310,26 @@ export function ReceiveStockModal({ products, categories, suppliers, initialProd
   const removeFromCart = (id: string) => {
     setCart((prev) => {
       const next = prev.filter((l) => l.id !== id);
-      if (next.length === 0) setInvoiceRemainingDebtTl("");
+      if (next.length === 0) {
+        setInvoiceTotalPaidTl("");
+        if (bulkEntry) {
+          clearBulkInvoiceDraft();
+          onDraftChange?.();
+        }
+      }
       return next;
     });
-    if (expandedCartId === id) setExpandedCartId(null);
   };
 
-  const updateCartLineDebt = (lineId: string, value: string) => {
-    setCart((prev) => prev.map((l) => (l.id === lineId ? { ...l, remainingDebtTl: value } : l)));
+  const clearCartList = () => {
+    if (!window.confirm("Listedeki tum kalemler silinsin mi? Kayitli taslak da temizlenir.")) return;
+    setCart([]);
+    setInvoiceTotalPaidTl("");
+    setDraftBannerVisible(false);
+    if (bulkEntry) {
+      clearBulkInvoiceDraft();
+      onDraftChange?.();
+    }
   };
 
   const bumpCartQty = (lineId: string, add: number) => {
@@ -286,6 +373,11 @@ export function ReceiveStockModal({ products, categories, suppliers, initialProd
     setSaving(true);
     try {
       await getMarinaApi().addStock(selectedProduct.id, built.raw, built.input);
+      if (bulkEntry) {
+        submittedRef.current = true;
+        clearBulkInvoiceDraft();
+        onDraftChange?.();
+      }
       await onSaved();
       onClose();
     } catch (e) {
@@ -326,8 +418,14 @@ export function ReceiveStockModal({ products, categories, suppliers, initialProd
 
   const submitCart = async () => {
     if (cart.length === 0) return;
-    const extraDebtTl = invoiceRemainingDebtTl.trim() || remainingDebtTl.trim();
-    const linesToSave = mergePendingDebtOntoLines(cart, extraDebtTl, previewLine);
+    let linesToSave: ReceiveCartLine[] | null;
+    if (invoiceTotalPaidTl.trim()) {
+      linesToSave = applyInvoicePaidOntoLines(cart, invoiceTotalPaidTl, previewLine);
+    } else if (bulkEntry) {
+      linesToSave = cart.map((l) => ({ ...l, remainingDebtTl: "" }));
+    } else {
+      linesToSave = cart;
+    }
     if (!linesToSave) return;
     setSaving(true);
     try {
@@ -339,6 +437,11 @@ export function ReceiveStockModal({ products, categories, suppliers, initialProd
         batchId = `SRB-${Date.now()}`;
       }
       await commitLines(linesToSave, batchId);
+      if (bulkEntry) {
+        submittedRef.current = true;
+        clearBulkInvoiceDraft();
+        onDraftChange?.();
+      }
       await onSaved();
       onClose();
     } catch (e) {
@@ -348,25 +451,35 @@ export function ReceiveStockModal({ products, categories, suppliers, initialProd
     }
   };
 
-  const pendingInvoiceDebtKurus = useMemo(() => {
-    const extra = invoiceRemainingDebtTl.trim() || remainingDebtTl.trim();
-    if (!extra) return 0;
-    const parsed = parseTrAmount(extra);
-    return parsed != null && parsed > 0 ? tlToKurus(parsed) : 0;
-  }, [invoiceRemainingDebtTl, remainingDebtTl]);
+  const invoicePaidKurusForTotals = useMemo(() => {
+    const trimmed = invoiceTotalPaidTl.trim();
+    if (!trimmed) return null;
+    const parsed = parseTrAmount(trimmed);
+    if (parsed == null || parsed < 0) return -1;
+    return tlToKurus(parsed);
+  }, [invoiceTotalPaidTl]);
 
   const cartTotals = useMemo(() => {
     let total = 0;
-    let debt = 0;
     for (const line of cart) {
-      const s = previewLine(line);
-      total += s.lineCost;
-      debt += s.debt;
+      total += previewLine({ ...line, remainingDebtTl: "" }).lineCost;
     }
-    const pendingDebt = Math.min(pendingInvoiceDebtKurus, Math.max(0, total - debt));
-    debt += pendingDebt;
-    return { total, debt, paid: total - debt, pendingDebt };
-  }, [cart, previewLine, pendingInvoiceDebtKurus]);
+    if (invoicePaidKurusForTotals === null) {
+      if (!bulkEntry) {
+        let debt = 0;
+        for (const line of cart) {
+          debt += previewLine(line).debt;
+        }
+        return { total, debt, paid: total - debt };
+      }
+      return { total, debt: 0, paid: total };
+    }
+    if (invoicePaidKurusForTotals < 0) {
+      return { total, debt: 0, paid: total };
+    }
+    const paid = Math.min(invoicePaidKurusForTotals, total);
+    return { total, debt: total - paid, paid };
+  }, [cart, previewLine, invoicePaidKurusForTotals]);
 
   const supplierName = suppliers.find((s) => s.id === supplierId)?.name ?? "—";
 
@@ -375,7 +488,7 @@ export function ReceiveStockModal({ products, categories, suppliers, initialProd
       className="modal-backdrop"
       role="presentation"
       onMouseDown={() => {
-        if (!saving) onClose();
+        if (!saving) handleClose();
       }}
     >
       <div
@@ -391,6 +504,12 @@ export function ReceiveStockModal({ products, categories, suppliers, initialProd
             ? "Once tedarikci secin; o firmaya bagli urunleri listeye ekleyin. Tum kalemler tek fatura (SRB) olarak kaydedilir."
             : "Tedarikci listesi yalnizca urun kartindaki firmalardan gelir. Stok, sectiginiz tedarikci uzerinden kaydedilir."}
         </p>
+
+        {bulkEntry && draftBannerVisible ? (
+          <p className="stock-receive-bulk-callout stock-receive-bulk-callout--draft" role="status">
+            Yarim kalan liste yuklendi ({cart.length} kalem). Kaldiginiz yerden devam edebilirsiniz.
+          </p>
+        ) : null}
 
         {bulkEntry && supplierId <= 0 ? (
           <p className="stock-receive-bulk-callout" role="status">
@@ -515,6 +634,7 @@ export function ReceiveStockModal({ products, categories, suppliers, initialProd
                     disabled={saving}
                     product={selectedProduct}
                     showCostPreview={false}
+                    hideRemainingDebt={bulkEntry}
                   />
                 </div>
                 <div className="stock-receive-detail-actions">
@@ -576,6 +696,7 @@ export function ReceiveStockModal({ products, categories, suppliers, initialProd
               onRemainingDebtTlChange={setRemainingDebtTl}
               disabled={saving}
               product={selectedProduct}
+              hideRemainingDebt={bulkEntry}
             />
           </>
         ) : !showSupplierPicker && !selectedProduct && !(bulkEntry && supplierId <= 0) ? (
@@ -594,113 +715,72 @@ export function ReceiveStockModal({ products, categories, suppliers, initialProd
             <ul className="stock-receive-cart-list">
               {cart.map((line) => {
                 const summary = previewLine(line);
-                const open = expandedCartId === line.id;
                 return (
-                  <li key={line.id} className={open ? "is-open" : ""}>
+                  <li key={line.id}>
                     <div className="stock-receive-cart-line-row">
-                      <button
-                        type="button"
-                        className="stock-receive-cart-line-btn"
-                        onClick={() => setExpandedCartId(open ? null : line.id)}
-                      >
+                      <div className="stock-receive-cart-line-main">
                         <span>
                           <span className="closure-code">{line.productCode}</span> {line.productName} —{" "}
                           {formatQtyShort(line.qty, line.saleUnit)}
                         </span>
                         <span>{formatTry(summary.lineCost)}</span>
-                      </button>
+                      </div>
                       {line.saleUnit === "piece" ? (
-                        <div
-                          className="stock-receive-qty-bump stock-receive-cart-line-bump"
-                          aria-label="Listede adet artir"
-                          onClick={(e) => e.stopPropagation()}
-                          onMouseDown={(e) => e.stopPropagation()}
-                        >
+                        <div className="stock-receive-qty-bump stock-receive-cart-line-bump" aria-label="Listede adet artir">
                           <button type="button" disabled={saving} onClick={() => bumpCartQty(line.id, 5)}>
                             +5
                           </button>
-                          <button
-                            type="button"
-                            className="stock-receive-qty-bump-10"
-                            disabled={saving}
-                            onClick={() => bumpCartQty(line.id, 10)}
-                          >
+                          <button type="button" className="stock-receive-qty-bump-10" disabled={saving} onClick={() => bumpCartQty(line.id, 10)}>
                             +10
                           </button>
                         </div>
                       ) : null}
+                      <button
+                        type="button"
+                        className="stock-receive-cart-line-remove"
+                        disabled={saving}
+                        onClick={() => removeFromCart(line.id)}
+                        aria-label={`${line.productName} listeden sil`}
+                      >
+                        Sil
+                      </button>
                     </div>
-                    {open ? (
-                      <div className="stock-receive-cart-detail">
-                        <p className="muted small">
-                          Miktar: <strong>{formatQtyShort(line.qty, line.saleUnit)}</strong>
-                          {line.saleUnit === "piece" ? (
-                            <>
-                              {" "}
-                              ·{" "}
-                              <button type="button" className="stock-receive-cart-qty-link" disabled={saving} onClick={() => bumpCartQty(line.id, 5)}>
-                                +5 adet
-                              </button>
-                              <button type="button" className="stock-receive-cart-qty-link stock-receive-qty-bump-10" disabled={saving} onClick={() => bumpCartQty(line.id, 10)}>
-                                +10 adet
-                              </button>
-                            </>
-                          ) : null}
-                        </p>
-                        <p className="muted small">
-                          Mod: {line.costMode === "invoice" ? "Odenen fatura" : "Urun bazli"} · Odenen:{" "}
-                          {formatTry(summary.paid)}
-                          {summary.debt > 0 ? ` · Borc ${formatTry(summary.debt)}` : ""}
-                        </p>
-                        <label className="stock-receive-cart-debt-edit">
-                          <span className="stock-incoming-cost-title">Kalan borc (TL)</span>
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            value={line.remainingDebtTl}
-                            onChange={(e) => updateCartLineDebt(line.id, e.target.value)}
-                            disabled={saving}
-                            placeholder="Bos = tam odendi"
-                          />
-                        </label>
-                        <button type="button" className="stock-receive-cart-remove" onClick={() => removeFromCart(line.id)}>
-                          Listeden cikar
-                        </button>
-                      </div>
-                    ) : null}
                   </li>
                 );
               })}
             </ul>
             <div className="stock-receive-cart-totals" aria-label="Fatura toplamlari">
               <label className="stock-receive-invoice-debt-label">
-                <span className="stock-incoming-cost-title">Fatura kalan borcu (TL)</span>
+                <span className="stock-incoming-cost-title">Odenen tutar (TL)</span>
                 <input
                   type="text"
                   inputMode="decimal"
-                  value={invoiceRemainingDebtTl}
-                  onChange={(e) => setInvoiceRemainingDebtTl(e.target.value)}
+                  value={invoiceTotalPaidTl}
+                  onChange={(e) => setInvoiceTotalPaidTl(e.target.value)}
                   disabled={saving}
                   placeholder="Bos = tam odendi"
                 />
                 <span className="stock-help small">
-                  Tum fatura icin odenmeyen tutar; kayit sirasinda kalemlere dagitilir ve tedarikci borcuna eklenir.
+                  Fatura icin odediginiz tutar. Fark ({formatTry(cartTotals.total)} − odenen) tedarikci borcuna yazilir;
+                  kayit sirasinda kalemlere dagitilir.
                 </span>
               </label>
               <div className="stock-receive-cart-totals-main">
                 <span className="stock-receive-cart-totals-label">Fatura toplami</span>
                 <strong className="stock-receive-cart-totals-amount">{formatTry(cartTotals.total)}</strong>
               </div>
-              {cartTotals.debt > 0 ? (
+              {invoiceTotalPaidTl.trim() !== "" || cartTotals.debt > 0 ? (
                 <div className="stock-receive-cart-totals-breakdown">
                   <div className="stock-receive-cart-totals-row">
                     <span>Odenen</span>
                     <span>{formatTry(cartTotals.paid)}</span>
                   </div>
-                  <div className="stock-receive-cart-totals-row stock-receive-cart-totals-row--debt">
-                    <span>Tedarikci borcu</span>
-                    <span>{formatTry(cartTotals.debt)}</span>
-                  </div>
+                  {cartTotals.debt > 0 ? (
+                    <div className="stock-receive-cart-totals-row stock-receive-cart-totals-row--debt">
+                      <span>Tedarikci borcu</span>
+                      <span>{formatTry(cartTotals.debt)}</span>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -709,22 +789,31 @@ export function ReceiveStockModal({ products, categories, suppliers, initialProd
 
         <p className="stock-help small">
           Liste bosken tek kalem dogrudan kaydedilir. Birden fazla kalem tek fatura grubu (SRB) olarak tedarikci gecmisinde
-          gorunur. Kalan borcu listeye eklemeden once urun satirinda, listede veya fatura toplami altindaki alandan
-          girebilirsiniz.
+          gorunur.
+          {bulkEntry
+            ? " Eksik odeme varsa fatura altindaki odenen tutari girin; kalan borc tedarikciye yazilir."
+            : " Eksik odeme varsa urun satirinda kalan borc veya fatura altindaki odenen tutari kullanabilirsiniz."}
         </p>
-        <div className="modal-actions">
-          <button type="button" disabled={saving} onClick={onClose}>
-            Vazgec
-          </button>
-          {cart.length > 0 ? (
-            <button type="button" className="primary" disabled={saving} onClick={() => void submitCart()}>
-              {saving ? "Kaydediliyor..." : `Tumunu kaydet (${cart.length})`}
+        <div className="modal-actions stock-receive-modal-actions">
+          {bulkEntry && cart.length > 0 ? (
+            <button type="button" className="stock-receive-cart-clear" disabled={saving} onClick={clearCartList}>
+              Listeyi temizle
             </button>
-          ) : (
-            <button type="button" className="primary" disabled={saving || !selectedProduct} onClick={() => void submitSingle()}>
-              {saving ? "Ekleniyor..." : unit === "gram" ? "Stoka gram ekle" : "Stoka adet ekle"}
+          ) : null}
+          <div className="stock-receive-modal-actions-end">
+            <button type="button" disabled={saving} onClick={handleClose}>
+              {bulkEntry && cart.length > 0 ? "Kapat" : "Vazgec"}
             </button>
-          )}
+            {cart.length > 0 ? (
+              <button type="button" className="primary" disabled={saving} onClick={() => void submitCart()}>
+                {saving ? "Kaydediliyor..." : `Tumunu kaydet (${cart.length})`}
+              </button>
+            ) : (
+              <button type="button" className="primary" disabled={saving || !selectedProduct} onClick={() => void submitSingle()}>
+                {saving ? "Ekleniyor..." : unit === "gram" ? "Stoka gram ekle" : "Stoka adet ekle"}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

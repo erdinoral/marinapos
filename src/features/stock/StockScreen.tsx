@@ -25,6 +25,7 @@ import { computeInventoryTotals, lineInventoryCostKurus } from "../../utils/inve
 import { StockInventorySummary } from "./StockInventorySummary";
 import { productSupplierLabel } from "../../utils/productSuppliers";
 import { BarcodePrintModal } from "./BarcodePrintModal";
+import { bulkInvoiceDraftSummary } from "./bulkInvoiceDraft";
 import { ReceiveStockModal } from "./ReceiveStockModal";
 import type { ReceiveStockPrefill } from "./receiveStockTypes";
 import { SalesHistoryPanel } from "../sales/SalesHistoryPanel";
@@ -80,6 +81,12 @@ export function StockScreen({ products, lowStock, categories, suppliers, lowStoc
   /** Gelen / toplu fatura modal */
   const [receiveStockModal, setReceiveStockModal] = useState<ReceiveModalState | null>(null);
   const [receiveModalKey, setReceiveModalKey] = useState(0);
+  const [bulkDraftSummary, setBulkDraftSummary] = useState(() => bulkInvoiceDraftSummary());
+  const refreshBulkDraftSummary = useCallback(() => setBulkDraftSummary(bulkInvoiceDraftSummary()), []);
+
+  useEffect(() => {
+    refreshBulkDraftSummary();
+  }, [refreshBulkDraftSummary]);
   /** Stok listesinden acilan sayim / stok duzelt modal */
   const [listAdjustProduct, setListAdjustProduct] = useState<Product | null>(null);
   const [listAdjustCounted, setListAdjustCounted] = useState("");
@@ -493,6 +500,9 @@ ${rows || `<tr><td colspan="3">Eksik urun yok</td></tr>`}
           <div className="stock-panel-list-actions">
             <button type="button" className="stock-barcode-btn stock-bulk-invoice-btn" onClick={openBulkInvoiceModal}>
               Toplu fatura
+              {bulkDraftSummary && bulkDraftSummary.lineCount > 0 ? (
+                <span className="stock-bulk-draft-badge"> ({bulkDraftSummary.lineCount} kalem)</span>
+              ) : null}
             </button>
           </div>
           <label className="search-wrap stock-list-search">
@@ -836,8 +846,12 @@ ${rows || `<tr><td colspan="3">Eksik urun yok</td></tr>`}
           initialProduct={receiveStockModal.initialProduct}
           bulkEntry={receiveStockModal.bulkEntry}
           prefill={receiveStockModal.prefill}
-          onClose={() => setReceiveStockModal(null)}
+          onClose={() => {
+            setReceiveStockModal(null);
+            refreshBulkDraftSummary();
+          }}
           onSaved={onStockChange}
+          onDraftChange={refreshBulkDraftSummary}
         />
       ) : null}
       {detailProduct ? (

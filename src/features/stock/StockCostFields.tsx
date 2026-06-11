@@ -19,6 +19,8 @@ type Props = {
   product?: Product | null;
   /** Toplu fatura modalinda onizleme blogu yer kaplar; false ile gizlenir */
   showCostPreview?: boolean;
+  /** Toplu faturada kalem borcu fatura altindaki odenen tutardan hesaplanir */
+  hideRemainingDebt?: boolean;
 };
 
 export function StockCostFields({
@@ -34,7 +36,8 @@ export function StockCostFields({
   onRemainingDebtTlChange,
   disabled,
   product,
-  showCostPreview = true
+  showCostPreview = true,
+  hideRemainingDebt = false
 }: Props) {
   const preview = useMemo(() => {
     const q = Math.max(0, Math.round(qty));
@@ -109,7 +112,11 @@ export function StockCostFields({
             disabled={disabled}
             autoComplete="off"
           />
-          <span className="stock-help small">Satir tutari = birim × miktar. Eksik odeme varsa asagida kalan borc girin.</span>
+          <span className="stock-help small">
+            {hideRemainingDebt
+              ? "Satir tutari = birim × miktar. Eksik odeme varsa fatura altindaki odenen tutardan hesaplanir."
+              : "Satir tutari = birim × miktar. Eksik odeme varsa asagida kalan borc girin."}
+          </span>
         </label>
       ) : (
         <label className="stock-incoming-cost-label">
@@ -145,21 +152,23 @@ export function StockCostFields({
         </label>
       ) : null}
 
-      <label className="stock-incoming-cost-label">
-        <span className="stock-incoming-cost-title">Kalan borc (TL)</span>
-        <input
-          type="text"
-          inputMode="decimal"
-          value={remainingDebtTl}
-          onChange={(e) => onRemainingDebtTlChange(e.target.value)}
-          disabled={disabled}
-          autoComplete="off"
-          placeholder="Bos = tam odendi"
-        />
-        <span className="stock-help small">
-          Alis tutarinin odenmeyen kismi; secili tedarikcinin borcuna eklenir. Gidere yalnizca odenen tutar yazilir.
-        </span>
-      </label>
+      {hideRemainingDebt ? null : (
+        <label className="stock-incoming-cost-label">
+          <span className="stock-incoming-cost-title">Kalan borc (TL)</span>
+          <input
+            type="text"
+            inputMode="decimal"
+            value={remainingDebtTl}
+            onChange={(e) => onRemainingDebtTlChange(e.target.value)}
+            disabled={disabled}
+            autoComplete="off"
+            placeholder="Bos = tam odendi"
+          />
+          <span className="stock-help small">
+            Alis tutarinin odenmeyen kismi; secili tedarikcinin borcuna eklenir. Gidere yalnizca odenen tutar yazilir.
+          </span>
+        </label>
+      )}
 
       {preview && "error" in preview ? <p className="stock-cost-preview stock-cost-preview-warn">{preview.error}</p> : null}
       {!showCostPreview &&
