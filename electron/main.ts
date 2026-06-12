@@ -216,8 +216,11 @@ ipcMain.handle("products:adjust-stock", (_, productId: number, countedQty: numbe
 ipcMain.handle("products:low-stock", () => database.products.lowStock());
 ipcMain.handle("products:stock-entry-log", () => database.products.listStockEntryLog());
 ipcMain.handle("products:stock-movement-log", () => database.products.listStockMovementLog());
-ipcMain.handle("products:delete-stock-entry", (_, movementId: number) => {
-  database.products.deleteStockEntry(Number(movementId));
+ipcMain.handle("products:delete-stock-entry", (_, movementId: number, productId?: number) => {
+  database.products.deleteStockEntry(Number(movementId), productId != null ? Number(productId) : undefined);
+});
+ipcMain.handle("products:delete-stock-receive-batch", (_, receiveBatchId: string) => {
+  database.products.deleteStockReceiveBatch(String(receiveBatchId ?? ""));
 });
 ipcMain.handle("media:select-image", async (_, suggestedName?: string) => {
   const result = await dialog.showOpenDialog({

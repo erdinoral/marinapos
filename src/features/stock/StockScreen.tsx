@@ -3,7 +3,6 @@ import { motion } from "framer-motion";
 import { getMarinaApi } from "../../api/marinaClient";
 import {
   Category,
-  CategorySaleUnit,
   Product,
   Settings,
   StockAgingRow,
@@ -16,41 +15,39 @@ import {
   formatQtyShort,
   formatTlPer1000g,
   inventoryRevenueKurus,
-  kurusPerGramToTlPer1000g,
   normalizeGramStockQty
 } from "../../utils/saleUnit";
 import { formatTry } from "../../utils/currency";
-import { resolveStockEntryUnitCostKurus, stockCostModeLabel } from "../../utils/stockCost";
+import {
+  batchSiblingRows,
+  isBulkReceiveBatchId,
+  isDeletableStockEntryRow,
+  latestDeletableMovementIdByProduct,
+  stockEntryDeleteAction,
+  stockEntryRowCanDelete,
+  stockEntryRowsCanEdit
+} from "../../utils/stockEntryDelete";
 import { computeInventoryTotals, lineInventoryCostKurus } from "../../utils/inventoryTotals";
 import { StockInventorySummary } from "./StockInventorySummary";
 import { productHasSupplier, productSupplierLabel } from "../../utils/productSuppliers";
 import { BarcodePrintModal } from "./BarcodePrintModal";
 import { bulkInvoiceDraftSummary } from "./bulkInvoiceDraft";
 import { ReceiveStockModal } from "./ReceiveStockModal";
-import type { ReceiveStockPrefill } from "./receiveStockTypes";
+import type { EditReceiveInvoice, ReceiveStockPrefill } from "./receiveStockTypes";
+import { buildEditInvoiceFromBatch, buildEditInvoiceFromSingleRow } from "../../utils/stockBatchEdit";
 import { SalesHistoryPanel } from "../sales/SalesHistoryPanel";
+import { StockEntryLogList } from "./StockEntryLogList";
 
 function netRetailUnitKurus(p: Product): number {
   const d = Math.max(0, Math.min(100, Number(p.discountPercent ?? 0)));
   return Math.round((p.priceKurus * (100 - d)) / 100);
 }
 
-function incomingTlFromUnitCostKurus(kurus: number, unit: CategorySaleUnit): string {
-  if (kurus <= 0) return "";
-  return unit === "gram" ? kurusPerGramToTlPer1000g(kurus).toFixed(2) : (kurus / 100).toFixed(2);
-}
-
-function stockEntryUnitCostLabel(entry: StockEntryLogRow, unit: CategorySaleUnit): string {
-  const kurus = resolveStockEntryUnitCostKurus(entry, unit);
-  if (kurus == null || kurus <= 0) return "—";
-  if (unit === "gram") return `${kurusPerGramToTlPer1000g(kurus)} / 1000 g`;
-  return `${formatTry(kurus)} / adet`;
-}
-
 type ReceiveModalState = {
   initialProduct: Product | null;
   bulkEntry: boolean;
   prefill?: ReceiveStockPrefill;
+  editInvoice?: EditReceiveInvoice;
 };
 
 interface Props {
@@ -138,31 +135,6 @@ export function StockScreen({ products, lowStock, categories, suppliers, lowStoc
     setStockRowContext(null);
   }, []);
 
-  const applyEntryLogToStockAdd = useCallback(
-    (row: StockEntryLogRow) => {
-      const p = products.find((x) => x.id === row.productId);
-      if (!p) {
-        window.alert("Urun bulunamadi.");
-        return;
-      }
-      const unit = row.saleUnit ?? categorySaleUnitOf(categories, p.categoryId);
-      const unitKurus = resolveStockEntryUnitCostKurus(row, unit);
-      const prefill: ReceiveStockPrefill = {
-        costMode: row.costMode ?? "product",
-        supplierId: row.supplierId,
-        invoicePaidTl:
-          row.invoicePaidKurus != null && row.invoicePaidKurus > 0 ? (row.invoicePaidKurus / 100).toFixed(2) : "",
-        remainingDebtTl:
-          row.debtAddedKurus != null && row.debtAddedKurus > 0 ? (row.debtAddedKurus / 100).toFixed(2) : ""
-      };
-      if (unitKurus != null && unitKurus > 0) {
-        prefill.incomingCostTl = incomingTlFromUnitCostKurus(unitKurus, unit);
-      }
-      openReceiveStockModal(p, prefill);
-    },
-    [categories, products, openReceiveStockModal]
-  );
-
   const openBarcodePrint = useCallback((product: Product) => {
     setSelectedId(product.id);
     setBarcodePrintOpen(true);
@@ -185,6 +157,43 @@ export function StockScreen({ products, lowStock, categories, suppliers, lowStoc
     setReceiveStockModal({ initialProduct: null, bulkEntry: true });
     setStockRowContext(null);
   };
+
+  const latestDeletableByProduct = useMemo(
+    () => latestDeletableMovementIdByProduct(entryLog),
+    [entryLog]
+  );
+
+  const openEditInvoice = useCallback(
+    (rows: StockEntryLogRow[]) => {
+      if (!stockEntryRowsCanEdit(rows, latestDeletableByProduct, entryLog)) {
+        window.alert(
+          "Bu fatura duzenlenemez. Faturadan sonra ayni urune yeni giris yapilmis olabilir; once o girisi silin."
+        );
+        return;
+      }
+      const batchId = rows[0]?.receiveBatchId?.trim();
+      const editInvoice =
+        batchId && isBulkReceiveBatchId(batchId) && rows.length > 1
+          ? buildEditInvoiceFromBatch(batchId, rows)
+          : buildEditInvoiceFromSingleRow(rows[0]);
+      setReceiveModalKey((k) => k + 1);
+      setReceiveStockModal({
+        initialProduct: null,
+        bulkEntry: editInvoice.cart.length > 1,
+        editInvoice
+      });
+      setStockRowContext(null);
+    },
+    [entryLog, latestDeletableByProduct]
+  );
+
+  const editStockEntryRow = useCallback(
+    (row: StockEntryLogRow) => {
+      const siblings = batchSiblingRows(row, entryLog);
+      openEditInvoice(siblings.length > 1 ? siblings : [row]);
+    },
+    [entryLog, openEditInvoice]
+  );
 
   const openListAdjustModal = (p: Product) => {
     const unit = categorySaleUnitOf(categories, p.categoryId);
@@ -368,15 +377,6 @@ ${rows || `<tr><td colspan="4">Eksik urun yok</td></tr>`}
     window.setTimeout(doPrint, 250);
   };
 
-  /** Liste en yeni ustte; urun basina ilk gorulen = o urunun son girisi */
-  const latestMovementIdByProduct = useMemo(() => {
-    const map = new Map<number, number>();
-    for (const row of entryLog) {
-      if (!map.has(row.productId)) map.set(row.productId, row.movementId);
-    }
-    return map;
-  }, [entryLog]);
-
   const refreshEntryLog = useCallback(async () => {
     const api = getMarinaApi();
     try {
@@ -390,21 +390,36 @@ ${rows || `<tr><td colspan="4">Eksik urun yok</td></tr>`}
   }, []);
 
   const deleteStockEntry = async (row: StockEntryLogRow) => {
-    if (latestMovementIdByProduct.get(row.productId) !== row.movementId) {
-      window.alert("Yalnizca her urunun en son stok girisi silinebilir. Once daha yeni girisi silin.");
+    const canDelete = stockEntryRowCanDelete(row, latestDeletableByProduct, entryLog);
+    if (!canDelete) {
+      const note = String(row.note ?? "").trim().toLocaleLowerCase("tr");
+      if (note === "iade" || note.startsWith("iade ")) {
+        window.alert("Satis iadesi kaydi buradan silinmez.");
+        return;
+      }
+      if (row.productId <= 0) {
+        window.alert("Tedarikci borc odemesi buradan silinmez.");
+        return;
+      }
+      window.alert("Yalnizca her urunun en son gelen stok girisi silinebilir. Once daha yeni girisi silin.");
       return;
     }
-    const label = `${row.productName} (+${formatQtyShort(row.qty, row.saleUnit ?? "piece")})`;
-    if (
-      !window.confirm(
-        `${label} kaydi silinsin mi?\n\nStok miktarindan dusulur, ilgili mal alimi gideri ve varsa tedarikci borcu geri alinir.`
-      )
-    ) {
+    const action = stockEntryDeleteAction(row, entryLog);
+    const confirmMsg =
+      action.mode === "batch"
+        ? `${action.lineCount} kalemlik toplu fatura (${action.batchId}) silinsin mi?\n\nTum satirlarin stogu, mal alimi gideri ve tedarikci borcu geri alinir.`
+        : `${row.productName} (+${formatQtyShort(row.qty, row.saleUnit ?? "piece")}) kaydi silinsin mi?\n\nStok miktarindan dusulur, ilgili mal alimi gideri ve varsa tedarikci borcu geri alinir.`;
+    if (!window.confirm(confirmMsg)) {
       return;
     }
     setDeletingEntryId(row.movementId);
     try {
-      await getMarinaApi().deleteStockEntry(row.movementId);
+      const api = getMarinaApi();
+      if (action.mode === "batch" && typeof api.deleteStockReceiveBatch === "function") {
+        await api.deleteStockReceiveBatch(action.batchId);
+      } else {
+        await api.deleteStockEntry(row.movementId, row.productId);
+      }
       await onStockChange();
       await refreshEntryLog();
     } catch (e) {
@@ -699,8 +714,8 @@ ${rows || `<tr><td colspan="4">Eksik urun yok</td></tr>`}
         <div className="stock-panel-list-top stock-panel-list-top--compact">
           <h2 className="visually-hidden">Stok ekleme gecmisi</h2>
           <p className="stock-help small">
-            En yeni kayitlar ustte. <strong>Satira tik</strong>: ayni urunle gelen / stok ekle penceresini acar (birim gelis dolu gelir).
-            Sil: stok, mal alimi gideri ve tedarikci borcunu geri alir (urunun en son girisi).
+            En yeni kayitlar ustte. <strong>Satira tik</strong> veya <strong>⋯</strong> / sag tik: fatura detayi, duzeltme, silme.
+            Toplu fatura tek satirda; kalemler detayda gorunur.
           </p>
         </div>
         <div className="stock-scroll-body stock-scroll-body--list">
@@ -713,92 +728,19 @@ ${rows || `<tr><td colspan="4">Eksik urun yok</td></tr>`}
               <span>Miktar</span>
               <span>Birim gelis</span>
               <span>Toplam</span>
-              <span>Not</span>
+              <span>Detay</span>
               <span className="stock-entry-col-actions" aria-hidden="true" />
             </div>
-            {entryLog.map((row) => {
-              const p = products.find((x) => x.id === row.productId);
-              const unit = row.saleUnit ?? (p ? categorySaleUnitOf(categories, p.categoryId) : "piece");
-              const canDelete = latestMovementIdByProduct.get(row.productId) === row.movementId;
-              const deleting = deletingEntryId === row.movementId;
-              return (
-                <motion.div
-                  key={row.movementId}
-                  role="button"
-                  tabIndex={0}
-                  className={`stock-entry-row stock-entry-row--cost stock-entry-row--clickable${selectedId === row.productId ? " stock-entry-row--picked" : ""}`}
-                  title="Tikla: gelen / stok ekle penceresini ac"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  onClick={() => applyEntryLogToStockAdd(row)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      applyEntryLogToStockAdd(row);
-                    }
-                  }}
-                >
-                  <span>{formatDateTime(row.createdAt)}</span>
-                  <span title={row.productName}>{row.productName}</span>
-                  <span>{row.productCode || "—"}</span>
-                  <span title={row.supplierName}>{row.supplierName || "—"}</span>
-                  <span>+{formatQtyShort(row.qty, unit)}</span>
-                  <span>{stockEntryUnitCostLabel(row, unit)}</span>
-                  <span>
-                    {row.lineCostKurus != null && row.lineCostKurus > 0 ? formatTry(row.lineCostKurus) : "—"}
-                    {row.costMode === "invoice" &&
-                    row.catalogLineCostKurus != null &&
-                    row.catalogLineCostKurus > 0 &&
-                    row.catalogLineCostKurus !== row.lineCostKurus ? (
-                      <span className="stock-entry-catalog-hint" title="Liste / birim hesabi">
-                        {" "}
-                        (liste {formatTry(row.catalogLineCostKurus)})
-                      </span>
-                    ) : null}
-                  </span>
-                  <span title={row.note}>
-                    {row.costMode ? `[${stockCostModeLabel(row.costMode)}] ` : ""}
-                    {(row.debtAddedKurus ?? 0) > 0 ? (
-                      <span className="supplier-debt-badge supplier-debt-badge-inline" title="Bu girisle eklenen tedarikci borcu">
-                        +borc {formatTry(row.debtAddedKurus!)}
-                      </span>
-                    ) : null}{" "}
-                    {row.note || "-"}
-                  </span>
-                  <span className="stock-entry-col-actions">
-                    <button
-                      type="button"
-                      className="stock-entry-delete-btn"
-                      disabled={!canDelete || deletingEntryId != null}
-                      title={
-                        canDelete
-                          ? "Bu girisi sil (stok, gider ve borc geri alinir)"
-                          : "Once bu urunun daha yeni stok girisini silin"
-                      }
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void deleteStockEntry(row);
-                      }}
-                    >
-                      {deleting ? "…" : "Sil"}
-                    </button>
-                  </span>
-                </motion.div>
-              );
-            })}
-            {entryLog.length === 0 && (
-              <div className="stock-entry-row stock-entry-row--cost stock-entry-row--empty">
-                <span>Kayit yok</span>
-                <span>—</span>
-                <span>—</span>
-                <span>—</span>
-                <span>—</span>
-                <span>—</span>
-                <span>—</span>
-                <span>—</span>
-                <span>—</span>
-              </div>
-            )}
+            <StockEntryLogList
+              entryLog={entryLog}
+              products={products}
+              categories={categories}
+              latestDeletableByProduct={latestDeletableByProduct}
+              deletingEntryId={deletingEntryId}
+              formatDateTime={formatDateTime}
+              onEdit={editStockEntryRow}
+              onDelete={(row) => void deleteStockEntry(row)}
+            />
           </div>
         </div>
       </section>
@@ -875,6 +817,7 @@ ${rows || `<tr><td colspan="4">Eksik urun yok</td></tr>`}
           initialProduct={receiveStockModal.initialProduct}
           bulkEntry={receiveStockModal.bulkEntry}
           prefill={receiveStockModal.prefill}
+          editInvoice={receiveStockModal.editInvoice ?? null}
           onClose={() => {
             setReceiveStockModal(null);
             refreshBulkDraftSummary();

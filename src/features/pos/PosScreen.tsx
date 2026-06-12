@@ -68,6 +68,7 @@ import { PosCartCustomerSelect } from "./PosCartCustomerSelect";
 import { ProductStockBadge } from "./ProductStockBadge";
 import { CustomersPanel } from "../customers/CustomersPanel";
 import { ReceiveStockModal } from "../stock/ReceiveStockModal";
+import type { EditReceiveInvoice } from "../stock/receiveStockTypes";
 import { ProductSuppliersField } from "../products/ProductSuppliersField";
 import { normalizeAlternateSupplierIds } from "../../utils/productSuppliers";
 import { StockAdjustModal } from "../stock/StockAdjustModal";
@@ -435,6 +436,8 @@ export function PosScreen({
   /** Satis urun karti: sag tik menusu */
   const [productContext, setProductContext] = useState<{ x: number; y: number; product: Product } | null>(null);
   const [posReceiveProduct, setPosReceiveProduct] = useState<Product | null>(null);
+  const [editReceiveInvoice, setEditReceiveInvoice] = useState<EditReceiveInvoice | null>(null);
+  const [receiveModalKey, setReceiveModalKey] = useState(0);
   const [posAdjustProduct, setPosAdjustProduct] = useState<Product | null>(null);
   const [imageSrcMap, setImageSrcMap] = useState<Record<string, string>>({});
   const [imageLoadErrors, setImageLoadErrors] = useState<Record<string, boolean>>({});
@@ -2623,6 +2626,11 @@ export function PosScreen({
             onOpenSaleDetail={(saleId) => void openSaleDetail(saleId)}
             onSuppliersChange={() => void onDataRefresh?.()}
             onCustomersChange={() => void refreshCustomers()}
+            onEditStockInvoice={(edit) => {
+              setReceiveModalKey((k) => k + 1);
+              setEditReceiveInvoice(edit);
+              setPosReceiveProduct(null);
+            }}
           />
         </section>
       )}
@@ -3215,13 +3223,21 @@ export function PosScreen({
           </li>
         </ul>
       ) : null}
-      {posReceiveProduct ? (
+      {posReceiveProduct || editReceiveInvoice ? (
         <ReceiveStockModal
+          key={receiveModalKey}
           products={products}
           categories={categories}
           suppliers={suppliers}
-          initialProduct={products.find((p) => p.id === posReceiveProduct.id) ?? posReceiveProduct}
-          onClose={() => setPosReceiveProduct(null)}
+          initialProduct={
+            posReceiveProduct ? products.find((p) => p.id === posReceiveProduct.id) ?? posReceiveProduct : null
+          }
+          bulkEntry={editReceiveInvoice ? editReceiveInvoice.cart.length > 1 : false}
+          editInvoice={editReceiveInvoice}
+          onClose={() => {
+            setPosReceiveProduct(null);
+            setEditReceiveInvoice(null);
+          }}
           onSaved={refreshPosCatalog}
         />
       ) : null}

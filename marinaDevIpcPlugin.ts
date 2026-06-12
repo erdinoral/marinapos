@@ -210,7 +210,13 @@ function dispatch(db: DatabaseService, logs: ErrorLogService, channel: string, a
     case "products:stock-movement-log":
       return db.products.listStockMovementLog();
     case "products:delete-stock-entry":
-      db.products.deleteStockEntry(Number(args[0]));
+      db.products.deleteStockEntry(
+        Number(args[0]),
+        args[1] != null ? Number(args[1]) : undefined
+      );
+      return undefined;
+    case "products:delete-stock-receive-batch":
+      db.products.deleteStockReceiveBatch(String(args[0] ?? ""));
       return undefined;
     case "media:select-image":
       return "";

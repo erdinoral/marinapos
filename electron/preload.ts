@@ -41,7 +41,10 @@ contextBridge.exposeInMainWorld("marinaApi", {
   lowStock: () => ipcRenderer.invoke("products:low-stock"),
   getStockEntryLog: () => ipcRenderer.invoke("products:stock-entry-log"),
   getStockMovementLog: () => ipcRenderer.invoke("products:stock-movement-log"),
-  deleteStockEntry: (movementId: number) => ipcRenderer.invoke("products:delete-stock-entry", movementId),
+  deleteStockEntry: (movementId: number, productId?: number) =>
+    ipcRenderer.invoke("products:delete-stock-entry", movementId, productId),
+  deleteStockReceiveBatch: (receiveBatchId: string) =>
+    ipcRenderer.invoke("products:delete-stock-receive-batch", receiveBatchId),
   selectImage: (suggestedName?: string) => ipcRenderer.invoke("media:select-image", suggestedName ?? ""),
   getMediaDirectory: () => ipcRenderer.invoke("media:get-dir"),
   readImageAsDataUrl: (fullPath: string) => ipcRenderer.invoke("media:read-image-data-url", fullPath),

@@ -8,7 +8,7 @@ import { StockCostFields } from "./StockCostFields";
 import { buildStockAddInput, defaultCostTlForProduct } from "./stockAddHelpers";
 import { productHasSupplier, productSupplierIds } from "../../utils/productSuppliers";
 import { clearBulkInvoiceDraft, loadBulkInvoiceDraft, saveBulkInvoiceDraft } from "./bulkInvoiceDraft";
-import type { ReceiveCartLine, ReceiveStockPrefill } from "./receiveStockTypes";
+import type { EditReceiveInvoice, ReceiveCartLine, ReceiveStockPrefill } from "./receiveStockTypes";
 
 type Props = {
   products: Product[];
@@ -18,6 +18,8 @@ type Props = {
   /** Stok ekranindaki Toplu fatura dugmesinden acildi */
   bulkEntry?: boolean;
   prefill?: ReceiveStockPrefill | null;
+  /** Mevcut fatura / girisi duzenle */
+  editInvoice?: EditReceiveInvoice | null;
   onClose: () => void;
   onSaved: () => void | Promise<void>;
   onDraftChange?: () => void;
@@ -97,12 +99,19 @@ export function ReceiveStockModal({
   initialProduct,
   bulkEntry = false,
   prefill,
+  editInvoice = null,
   onClose,
   onSaved,
   onDraftChange
 }: Props) {
-  const bulkDraftOnMount = useMemo(() => (bulkEntry ? loadBulkInvoiceDraft() : null), [bulkEntry]);
-  const [supplierId, setSupplierId] = useState(bulkDraftOnMount?.supplierId ?? 0);
+  const isEditMode = editInvoice != null;
+  const bulkDraftOnMount = useMemo(
+    () => (bulkEntry && !isEditMode ? loadBulkInvoiceDraft() : null),
+    [bulkEntry, isEditMode]
+  );
+  const [supplierId, setSupplierId] = useState(
+    editInvoice?.supplierId ?? bulkDraftOnMount?.supplierId ?? prefill?.supplierId ?? 0
+  );
   const [pickerProductId, setPickerProductId] = useState<number | null>(bulkDraftOnMount?.pickerProductId ?? null);
   const [productSearch, setProductSearch] = useState(bulkDraftOnMount?.productSearch ?? "");
   const [qty, setQty] = useState(1);
@@ -110,8 +119,12 @@ export function ReceiveStockModal({
   const [costMode, setCostMode] = useState<StockCostMode>("product");
   const [invoicePaidTl, setInvoicePaidTl] = useState("");
   const [remainingDebtTl, setRemainingDebtTl] = useState("");
-  const [invoiceTotalPaidTl, setInvoiceTotalPaidTl] = useState(bulkDraftOnMount?.invoicePaidTl ?? "");
-  const [cart, setCart] = useState<ReceiveCartLine[]>(bulkDraftOnMount?.cart ?? []);
+  const [invoiceTotalPaidTl, setInvoiceTotalPaidTl] = useState(
+    editInvoice?.invoiceTotalPaidTl ?? bulkDraftOnMount?.invoicePaidTl ?? ""
+  );
+  const [cart, setCart] = useState<ReceiveCartLine[]>(editInvoice?.cart ?? bulkDraftOnMount?.cart ?? []);
+  const [editingCartLineId, setEditingCartLineId] = useState<string | null>(null);
+  const [showAddProductInEdit, setShowAddProductInEdit] = useState(false);
   const [draftBannerVisible, setDraftBannerVisible] = useState(
     Boolean(bulkDraftOnMount && bulkDraftOnMount.cart.length > 0)
   );
@@ -142,7 +155,8 @@ export function ReceiveStockModal({
 
   const unit = selectedProduct ? categorySaleUnitOf(categories, selectedProduct.categoryId) : "piece";
 
-  const singleProductMode = !bulkEntry && initialProduct != null;
+  const effectiveBulkEntry = bulkEntry || isEditMode;
+  const singleProductMode = !effectiveBulkEntry && initialProduct != null;
 
   const linkedSupplierIdsForProduct = useMemo(() => {
     const p = initialProduct ?? selectedProduct;
@@ -169,11 +183,31 @@ export function ReceiveStockModal({
       .sort((a, b) => a.name.localeCompare(b.name, "tr"));
   }, [supplierId, activeProducts, productSearch, categories]);
 
-  const showSupplierPicker = !singleProductMode && supplierId > 0 && supplierProducts.length > 0;
+  const showSupplierPickerBase = !singleProductMode && supplierId > 0 && supplierProducts.length > 0;
+  const showSupplierPicker = showSupplierPickerBase && (!isEditMode || showAddProductInEdit);
+
+  const selectCartLineForEdit = useCallback((line: ReceiveCartLine) => {
+    setEditingCartLineId(line.id);
+    setPickerProductId(line.productId);
+    setQty(line.qty);
+    setCostMode(line.costMode);
+    setIncomingCostTl(line.incomingCostTl);
+    setInvoicePaidTl(line.invoicePaidTl);
+    setRemainingDebtTl(line.remainingDebtTl);
+    if (line.supplierId > 0) setSupplierId(line.supplierId);
+  }, []);
 
   const resetFormForProduct = useCallback(
     (p: Product) => {
+      if (isEditMode) {
+        const existing = cartRef.current.find((l) => l.productId === p.id);
+        if (existing) {
+          selectCartLineForEdit(existing);
+          return;
+        }
+      }
       const u = categorySaleUnitOf(categories, p.categoryId);
+      setEditingCartLineId(null);
       setPickerProductId(p.id);
       setQty(u === "gram" ? 1000 : 1);
       setIncomingCostTl(defaultCostTlForProduct(p, u));
@@ -181,11 +215,11 @@ export function ReceiveStockModal({
       setInvoicePaidTl("");
       setRemainingDebtTl("");
     },
-    [categories]
+    [categories, isEditMode, selectCartLineForEdit]
   );
 
   const persistBulkDraftIfNeeded = useCallback(() => {
-    if (!bulkEntry || submittedRef.current) return;
+    if (!bulkEntry || isEditMode || submittedRef.current) return;
     const lines = cartRef.current;
     if (lines.length === 0) {
       clearBulkInvoiceDraft();
@@ -200,7 +234,7 @@ export function ReceiveStockModal({
       productSearch: productSearchRef.current
     });
     onDraftChange?.();
-  }, [bulkEntry, onDraftChange]);
+  }, [bulkEntry, isEditMode, onDraftChange]);
 
   const handleClose = useCallback(() => {
     if (saving) return;
@@ -217,8 +251,13 @@ export function ReceiveStockModal({
   useEffect(() => () => persistBulkDraftIfNeeded(), [persistBulkDraftIfNeeded]);
 
   useEffect(() => {
+    if (!editInvoice?.cart.length) return;
+    selectCartLineForEdit(editInvoice.cart[0]);
+  }, [editInvoice, selectCartLineForEdit]);
+
+  useEffect(() => {
     const p = initialProduct ?? null;
-    if (!p) return;
+    if (!p || isEditMode) return;
     const linked = productSupplierIds(p);
     let sid = 0;
     if (prefill?.supplierId != null && prefill.supplierId > 0 && linked.includes(prefill.supplierId)) {
@@ -236,7 +275,7 @@ export function ReceiveStockModal({
     if (prefill?.costMode) setCostMode(prefill.costMode);
     if (prefill?.invoicePaidTl) setInvoicePaidTl(prefill.invoicePaidTl);
     if (prefill?.remainingDebtTl) setRemainingDebtTl(prefill.remainingDebtTl);
-  }, [initialProduct?.id, resetFormForProduct, initialProduct, prefill]);
+  }, [initialProduct?.id, resetFormForProduct, initialProduct, prefill, isEditMode]);
 
   const onSupplierChange = (sid: number) => {
     setSupplierId(sid);
@@ -280,7 +319,7 @@ export function ReceiveStockModal({
     const built = buildInputForCurrent();
     if (!built) return;
     const line: ReceiveCartLine = {
-      id: newCartLineId(),
+      id: editingCartLineId ?? newCartLineId(),
       productId: selectedProduct.id,
       productName: selectedProduct.name,
       productCode: selectedProduct.code,
@@ -292,9 +331,14 @@ export function ReceiveStockModal({
       remainingDebtTl,
       supplierId: built.sid
     };
-    setCart((prev) => [...prev, line]);
-    setQty(unit === "gram" ? 1000 : 1);
-    setRemainingDebtTl("");
+    if (editingCartLineId) {
+      setCart((prev) => prev.map((l) => (l.id === editingCartLineId ? line : l)));
+      setEditingCartLineId(line.id);
+    } else {
+      setCart((prev) => [...prev, line]);
+      setQty(unit === "gram" ? 1000 : 1);
+      setRemainingDebtTl("");
+    }
     requestAnimationFrame(() => {
       if (pickListRef.current) pickListRef.current.scrollTop = savedScroll;
     });
@@ -305,10 +349,15 @@ export function ReceiveStockModal({
       const next = prev.filter((l) => l.id !== id);
       if (next.length === 0) {
         setInvoiceTotalPaidTl("");
+        setEditingCartLineId(null);
         if (bulkEntry) {
           clearBulkInvoiceDraft();
           onDraftChange?.();
         }
+      } else if (editingCartLineId === id) {
+        const fallback = next[0];
+        if (fallback) selectCartLineForEdit(fallback);
+        else setEditingCartLineId(null);
       }
       return next;
     });
@@ -409,12 +458,25 @@ export function ReceiveStockModal({
     [activeProducts]
   );
 
+  const removeEditedInvoice = async () => {
+    const api = getMarinaApi();
+    if (!editInvoice) return;
+    if (editInvoice.kind === "batch") {
+      if (typeof api.deleteStockReceiveBatch !== "function") {
+        throw new Error("Fatura duzenleme bu surumde desteklenmiyor.");
+      }
+      await api.deleteStockReceiveBatch(editInvoice.batchId);
+      return;
+    }
+    await api.deleteStockEntry(editInvoice.movementId, editInvoice.cart[0]?.productId);
+  };
+
   const submitCart = async () => {
     if (cart.length === 0) return;
     let linesToSave: ReceiveCartLine[] | null;
     if (invoiceTotalPaidTl.trim()) {
       linesToSave = applyInvoicePaidOntoLines(cart, invoiceTotalPaidTl, previewLine);
-    } else if (bulkEntry) {
+    } else if (effectiveBulkEntry) {
       linesToSave = cart.map((l) => ({ ...l, remainingDebtTl: "" }));
     } else {
       linesToSave = cart;
@@ -423,6 +485,9 @@ export function ReceiveStockModal({
     setSaving(true);
     try {
       const api = getMarinaApi();
+      if (editInvoice) {
+        await removeEditedInvoice();
+      }
       let batchId: string | undefined;
       if (linesToSave.length > 1 && typeof api.nextReceiveBatchId === "function") {
         batchId = await api.nextReceiveBatchId();
@@ -430,7 +495,7 @@ export function ReceiveStockModal({
         batchId = `SRB-${Date.now()}`;
       }
       await commitLines(linesToSave, batchId);
-      if (bulkEntry) {
+      if (bulkEntry && !isEditMode) {
         submittedRef.current = true;
         clearBulkInvoiceDraft();
         onDraftChange?.();
@@ -438,7 +503,7 @@ export function ReceiveStockModal({
       await onSaved();
       onClose();
     } catch (e) {
-      window.alert(e instanceof Error ? e.message : "Stok eklenemedi.");
+      window.alert(e instanceof Error ? e.message : isEditMode ? "Fatura guncellenemedi." : "Stok eklenemedi.");
     } finally {
       setSaving(false);
     }
@@ -458,7 +523,7 @@ export function ReceiveStockModal({
       total += previewLine({ ...line, remainingDebtTl: "" }).lineCost;
     }
     if (invoicePaidKurusForTotals === null) {
-      if (!bulkEntry) {
+      if (!effectiveBulkEntry) {
         let debt = 0;
         for (const line of cart) {
           debt += previewLine(line).debt;
@@ -476,6 +541,154 @@ export function ReceiveStockModal({
 
   const supplierName = suppliers.find((s) => s.id === supplierId)?.name ?? "—";
 
+  const renderProductDetailPanel = (addLabel: string) =>
+    selectedProduct ? (
+      <div className="stock-receive-detail-panel stock-receive-detail-panel--edit">
+        <div className="stock-receive-detail-body">
+          <p className="stock-receive-product-name">{selectedProduct.name}</p>
+          <p className="stock-help small">
+            Mevcut: <strong>{formatQtyShort(selectedProduct.stockQty, unit)}</strong>
+            {selectedProduct.stockQty < 0 ? (
+              <span className="stock-receive-deficit-hint"> — eksik satis; giris once borcu kapatir</span>
+            ) : null}
+          </p>
+          <label className="stock-receive-qty-label stock-receive-qty-label--inline">
+            {unit === "gram" ? "Eklenecek gram" : "Eklenecek adet"}
+            <div className="stock-receive-qty-row">
+              <input
+                type="number"
+                min={1}
+                step="1"
+                value={qty}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  setQty(unit === "gram" ? Math.max(1, Math.round(n || 0)) : Math.max(1, Math.round(n || 1)));
+                }}
+                disabled={saving}
+              />
+              {unit === "piece" ? (
+                <div className="stock-receive-qty-bump" aria-label="Adet hizli artir">
+                  <button type="button" disabled={saving} onClick={() => bumpFormQty(5)}>
+                    +5
+                  </button>
+                  <button type="button" className="stock-receive-qty-bump-10" disabled={saving} onClick={() => bumpFormQty(10)}>
+                    +10
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </label>
+          <StockCostFields
+            saleUnit={unit}
+            qty={qty}
+            costMode={costMode}
+            onCostModeChange={setCostMode}
+            incomingCostTl={incomingCostTl}
+            onIncomingCostTlChange={setIncomingCostTl}
+            invoicePaidTl={invoicePaidTl}
+            onInvoicePaidTlChange={setInvoicePaidTl}
+            remainingDebtTl={remainingDebtTl}
+            onRemainingDebtTlChange={setRemainingDebtTl}
+            disabled={saving}
+            product={selectedProduct}
+            showCostPreview={!isEditMode}
+            hideRemainingDebt={effectiveBulkEntry}
+          />
+        </div>
+        <div className="stock-receive-detail-actions">
+          <button type="button" className="primary stock-receive-add-line-btn" disabled={saving} onClick={addToCart}>
+            {addLabel}
+          </button>
+        </div>
+      </div>
+    ) : null;
+
+  const renderCartList = () => (
+    <ul className="stock-receive-cart-list">
+      {cart.map((line) => {
+        const summary = previewLine(line);
+        const isSelected = editingCartLineId === line.id;
+        return (
+          <li key={line.id} className={isSelected ? "is-selected" : ""}>
+            <div className="stock-receive-cart-line-row">
+              <button
+                type="button"
+                className={`stock-receive-cart-line-main${isSelected ? " is-selected" : ""}`}
+                disabled={saving}
+                onClick={() => selectCartLineForEdit(line)}
+                aria-pressed={isSelected}
+                aria-label={`${line.productName} kalemini duzenle`}
+              >
+                <span>
+                  <span className="closure-code">{line.productCode}</span> {line.productName} —{" "}
+                  {formatQtyShort(line.qty, line.saleUnit)}
+                </span>
+                <span>{formatTry(summary.lineCost)}</span>
+              </button>
+              {line.saleUnit === "piece" && !isEditMode ? (
+                <div className="stock-receive-qty-bump stock-receive-cart-line-bump" aria-label="Listede adet artir">
+                  <button type="button" disabled={saving} onClick={() => bumpCartQty(line.id, 5)}>
+                    +5
+                  </button>
+                  <button type="button" className="stock-receive-qty-bump-10" disabled={saving} onClick={() => bumpCartQty(line.id, 10)}>
+                    +10
+                  </button>
+                </div>
+              ) : null}
+              <button
+                type="button"
+                className="stock-receive-cart-line-remove"
+                disabled={saving}
+                onClick={() => removeFromCart(line.id)}
+                aria-label={`${line.productName} listeden sil`}
+              >
+                Sil
+              </button>
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+
+  const renderCartTotals = () => (
+    <div className="stock-receive-cart-totals" aria-label="Fatura toplamlari">
+      <label className="stock-receive-invoice-debt-label">
+        <span className="stock-incoming-cost-title">Odenen tutar (TL)</span>
+        <input
+          type="text"
+          inputMode="decimal"
+          value={invoiceTotalPaidTl}
+          onChange={(e) => setInvoiceTotalPaidTl(e.target.value)}
+          disabled={saving}
+          placeholder="Bos = tam odendi"
+        />
+        <span className="stock-help small">
+          Fatura icin odediginiz tutar. Fark ({formatTry(cartTotals.total)} − odenen) tedarikci borcuna yazilir; kayit
+          sirasinda kalemlere dagitilir.
+        </span>
+      </label>
+      <div className="stock-receive-cart-totals-main">
+        <span className="stock-receive-cart-totals-label">Fatura toplami</span>
+        <strong className="stock-receive-cart-totals-amount">{formatTry(cartTotals.total)}</strong>
+      </div>
+      {invoiceTotalPaidTl.trim() !== "" || cartTotals.debt > 0 ? (
+        <div className="stock-receive-cart-totals-breakdown">
+          <div className="stock-receive-cart-totals-row">
+            <span>Odenen</span>
+            <span>{formatTry(cartTotals.paid)}</span>
+          </div>
+          {cartTotals.debt > 0 ? (
+            <div className="stock-receive-cart-totals-row stock-receive-cart-totals-row--debt">
+              <span>Tedarikci borcu</span>
+              <span>{formatTry(cartTotals.debt)}</span>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+
   return (
     <div
       className="modal-backdrop"
@@ -491,12 +704,22 @@ export function ReceiveStockModal({
         aria-labelledby="stock-receive-title"
         onMouseDown={(e) => e.stopPropagation()}
       >
-        <h3 id="stock-receive-title">{bulkEntry ? "Toplu fatura / gelen stok" : "Gelen / stok ekle"}</h3>
+        <h3 id="stock-receive-title">
+          {isEditMode ? "Faturayi duzenle" : bulkEntry ? "Toplu fatura / gelen stok" : "Gelen / stok ekle"}
+        </h3>
         <p className="stock-help small">
-          {bulkEntry
-            ? "Once tedarikci secin; o firmaya bagli urunleri listeye ekleyin. Tum kalemler tek fatura (SRB) olarak kaydedilir."
-            : "Tedarikci listesi yalnizca urun kartindaki firmalardan gelir. Stok, sectiginiz tedarikci uzerinden kaydedilir."}
+          {isEditMode
+            ? "Listeden kaleme tiklayin; adet ve fiyati alttaki formdan guncelleyin. Kaydedince eski fatura silinir ve yeniden yazilir."
+            : bulkEntry
+              ? "Once tedarikci secin; o firmaya bagli urunleri listeye ekleyin. Tum kalemler tek fatura (SRB) olarak kaydedilir."
+              : "Tedarikci listesi yalnizca urun kartindaki firmalardan gelir. Stok, sectiginiz tedarikci uzerinden kaydedilir."}
         </p>
+
+        {isEditMode ? (
+          <p className="stock-receive-bulk-callout stock-receive-bulk-callout--draft" role="status">
+            Duzenleme modu — faturadan sonra ayni urune yeni giris yapildiysa once onu silin veya geri alin.
+          </p>
+        ) : null}
 
         {bulkEntry && draftBannerVisible ? (
           <p className="stock-receive-bulk-callout stock-receive-bulk-callout--draft" role="status">
@@ -504,7 +727,7 @@ export function ReceiveStockModal({
           </p>
         ) : null}
 
-        {bulkEntry && supplierId <= 0 ? (
+        {effectiveBulkEntry && supplierId <= 0 ? (
           <p className="stock-receive-bulk-callout" role="status">
             Baslamak icin asagidan <strong>tedarikci</strong> secin.
           </p>
@@ -512,10 +735,14 @@ export function ReceiveStockModal({
 
         <label className="stock-receive-qty-label">
           Tedarikci *
-          <select value={supplierId} disabled={saving || (singleProductMode && supplierOptions.length <= 1)} onChange={(e) => onSupplierChange(Number(e.target.value))}>
+          <select
+            value={supplierId}
+            disabled={saving || isEditMode || (singleProductMode && supplierOptions.length <= 1)}
+            onChange={(e) => onSupplierChange(Number(e.target.value))}
+          >
             {singleProductMode && supplierOptions.length === 0 ? (
               <option value={0}>Urun kartina tedarikci ekleyin</option>
-            ) : bulkEntry ? (
+            ) : effectiveBulkEntry ? (
               <option value={0}>Tedarikci secin</option>
             ) : supplierOptions.length > 1 ? (
               <option value={0}>Tedarikci secin</option>
@@ -529,6 +756,33 @@ export function ReceiveStockModal({
             ))}
           </select>
         </label>
+
+        {isEditMode && cart.length > 0 ? (
+          <section className="stock-receive-cart stock-receive-cart--edit" aria-label="Fatura kalemleri">
+            <div className="stock-receive-cart-head">
+              <strong>Fatura ({cart.length} kalem)</strong>
+              <span className="muted small">Duzenlemek icin kaleme tiklayin.</span>
+            </div>
+            {renderCartList()}
+          </section>
+        ) : null}
+
+        {isEditMode && editingCartLineId && selectedProduct
+          ? renderProductDetailPanel("Kalemi guncelle")
+          : null}
+
+        {isEditMode ? (
+          <div className="stock-receive-edit-add-row">
+            <button
+              type="button"
+              className="app-btn-secondary"
+              disabled={saving}
+              onClick={() => setShowAddProductInEdit((v) => !v)}
+            >
+              {showAddProductInEdit ? "Urun eklemeyi kapat" : "Faturaya urun ekle"}
+            </button>
+          </div>
+        ) : null}
 
         {showSupplierPicker ? (
           <div className="stock-receive-picker-layout">
@@ -575,71 +829,7 @@ export function ReceiveStockModal({
                 })}
               </ul>
             </div>
-            {selectedProduct ? (
-              <div className="stock-receive-detail-panel">
-                <div className="stock-receive-detail-body">
-                  <p className="stock-receive-product-name">{selectedProduct.name}</p>
-                  <p className="stock-help small">
-                    Mevcut: <strong>{formatQtyShort(selectedProduct.stockQty, unit)}</strong>
-                    {selectedProduct.stockQty < 0 ? (
-                      <span className="stock-receive-deficit-hint"> — eksik satis; giris once borcu kapatir</span>
-                    ) : null}
-                  </p>
-                  <label className="stock-receive-qty-label stock-receive-qty-label--inline">
-                    {unit === "gram" ? "Eklenecek gram" : "Eklenecek adet"}
-                    <div className="stock-receive-qty-row">
-                      <input
-                        type="number"
-                        min={1}
-                        step="1"
-                        value={qty}
-                        onChange={(e) => {
-                          const n = Number(e.target.value);
-                          setQty(unit === "gram" ? Math.max(1, Math.round(n || 0)) : Math.max(1, Math.round(n || 1)));
-                        }}
-                        disabled={saving}
-                      />
-                      {unit === "piece" ? (
-                        <div className="stock-receive-qty-bump" aria-label="Adet hizli artir">
-                          <button type="button" disabled={saving} onClick={() => bumpFormQty(5)}>
-                            +5
-                          </button>
-                          <button
-                            type="button"
-                            className="stock-receive-qty-bump-10"
-                            disabled={saving}
-                            onClick={() => bumpFormQty(10)}
-                          >
-                            +10
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
-                  </label>
-                  <StockCostFields
-                    saleUnit={unit}
-                    qty={qty}
-                    costMode={costMode}
-                    onCostModeChange={setCostMode}
-                    incomingCostTl={incomingCostTl}
-                    onIncomingCostTlChange={setIncomingCostTl}
-                    invoicePaidTl={invoicePaidTl}
-                    onInvoicePaidTlChange={setInvoicePaidTl}
-                    remainingDebtTl={remainingDebtTl}
-                    onRemainingDebtTlChange={setRemainingDebtTl}
-                    disabled={saving}
-                    product={selectedProduct}
-                    showCostPreview={false}
-                    hideRemainingDebt={bulkEntry}
-                  />
-                </div>
-                <div className="stock-receive-detail-actions">
-                  <button type="button" className="primary stock-receive-add-line-btn" disabled={saving} onClick={addToCart}>
-                    Listeye ekle
-                  </button>
-                </div>
-              </div>
-            ) : (
+            {selectedProduct ? renderProductDetailPanel(editingCartLineId ? "Kalemi guncelle" : "Listeye ekle") : (
               <p className="muted small">Stok eklemek icin urun secin.</p>
             )}
           </div>
@@ -698,114 +888,54 @@ export function ReceiveStockModal({
               hideRemainingDebt={bulkEntry}
             />
           </>
-        ) : !showSupplierPicker && !selectedProduct && !(bulkEntry && supplierId <= 0) ? (
+        ) : !showSupplierPicker && !selectedProduct && !(effectiveBulkEntry && supplierId <= 0) ? (
           <p className="muted small">
-            {bulkEntry
+            {effectiveBulkEntry
               ? "Tedarikci secince urun listesi acilir."
               : "Stok eklemek icin urun secin veya sag tik ile gelen stok acin."}
           </p>
         ) : null}
 
-        {cart.length > 0 ? (
+        {!isEditMode && cart.length > 0 ? (
           <section className="stock-receive-cart" aria-label="Gelen stok listesi">
             <div className="stock-receive-cart-head">
               <strong>Liste ({cart.length} kalem)</strong>
             </div>
-            <ul className="stock-receive-cart-list">
-              {cart.map((line) => {
-                const summary = previewLine(line);
-                return (
-                  <li key={line.id}>
-                    <div className="stock-receive-cart-line-row">
-                      <div className="stock-receive-cart-line-main">
-                        <span>
-                          <span className="closure-code">{line.productCode}</span> {line.productName} —{" "}
-                          {formatQtyShort(line.qty, line.saleUnit)}
-                        </span>
-                        <span>{formatTry(summary.lineCost)}</span>
-                      </div>
-                      {line.saleUnit === "piece" ? (
-                        <div className="stock-receive-qty-bump stock-receive-cart-line-bump" aria-label="Listede adet artir">
-                          <button type="button" disabled={saving} onClick={() => bumpCartQty(line.id, 5)}>
-                            +5
-                          </button>
-                          <button type="button" className="stock-receive-qty-bump-10" disabled={saving} onClick={() => bumpCartQty(line.id, 10)}>
-                            +10
-                          </button>
-                        </div>
-                      ) : null}
-                      <button
-                        type="button"
-                        className="stock-receive-cart-line-remove"
-                        disabled={saving}
-                        onClick={() => removeFromCart(line.id)}
-                        aria-label={`${line.productName} listeden sil`}
-                      >
-                        Sil
-                      </button>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-            <div className="stock-receive-cart-totals" aria-label="Fatura toplamlari">
-              <label className="stock-receive-invoice-debt-label">
-                <span className="stock-incoming-cost-title">Odenen tutar (TL)</span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={invoiceTotalPaidTl}
-                  onChange={(e) => setInvoiceTotalPaidTl(e.target.value)}
-                  disabled={saving}
-                  placeholder="Bos = tam odendi"
-                />
-                <span className="stock-help small">
-                  Fatura icin odediginiz tutar. Fark ({formatTry(cartTotals.total)} − odenen) tedarikci borcuna yazilir;
-                  kayit sirasinda kalemlere dagitilir.
-                </span>
-              </label>
-              <div className="stock-receive-cart-totals-main">
-                <span className="stock-receive-cart-totals-label">Fatura toplami</span>
-                <strong className="stock-receive-cart-totals-amount">{formatTry(cartTotals.total)}</strong>
-              </div>
-              {invoiceTotalPaidTl.trim() !== "" || cartTotals.debt > 0 ? (
-                <div className="stock-receive-cart-totals-breakdown">
-                  <div className="stock-receive-cart-totals-row">
-                    <span>Odenen</span>
-                    <span>{formatTry(cartTotals.paid)}</span>
-                  </div>
-                  {cartTotals.debt > 0 ? (
-                    <div className="stock-receive-cart-totals-row stock-receive-cart-totals-row--debt">
-                      <span>Tedarikci borcu</span>
-                      <span>{formatTry(cartTotals.debt)}</span>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
+            {renderCartList()}
+            {renderCartTotals()}
+          </section>
+        ) : null}
+
+        {isEditMode && cart.length > 0 ? (
+          <section className="stock-receive-cart stock-receive-cart--edit-totals" aria-label="Fatura toplamlari">
+            {renderCartTotals()}
           </section>
         ) : null}
 
         <p className="stock-help small">
           Liste bosken tek kalem dogrudan kaydedilir. Birden fazla kalem tek fatura grubu (SRB) olarak tedarikci gecmisinde
           gorunur.
-          {bulkEntry
+          {effectiveBulkEntry
             ? " Eksik odeme varsa fatura altindaki odenen tutari girin; kalan borc tedarikciye yazilir."
             : " Eksik odeme varsa urun satirinda kalan borc veya fatura altindaki odenen tutari kullanabilirsiniz."}
         </p>
         <div className="modal-actions stock-receive-modal-actions">
-          {bulkEntry && cart.length > 0 ? (
+          {effectiveBulkEntry && cart.length > 0 && !isEditMode ? (
             <button type="button" className="stock-receive-cart-clear" disabled={saving} onClick={clearCartList}>
               Listeyi temizle
             </button>
           ) : null}
           <div className="stock-receive-modal-actions-end">
             <button type="button" disabled={saving} onClick={handleClose}>
-              {bulkEntry && cart.length > 0 ? "Kapat" : "Vazgec"}
+              {effectiveBulkEntry && cart.length > 0 ? "Kapat" : "Vazgec"}
             </button>
             {cart.length > 0 ? (
               <button type="button" className="primary" disabled={saving} onClick={() => void submitCart()}>
-                {saving ? "Kaydediliyor..." : `Tumunu kaydet (${cart.length})`}
+                {saving
+                  ? "Kaydediliyor..."
+                  : isEditMode
+                    ? `Faturayi kaydet (${cart.length})`
+                    : `Tumunu kaydet (${cart.length})`}
               </button>
             ) : (
               <button type="button" className="primary" disabled={saving || !selectedProduct} onClick={() => void submitSingle()}>

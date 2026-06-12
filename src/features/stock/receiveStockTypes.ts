@@ -21,3 +21,20 @@ export type ReceiveCartLine = {
   remainingDebtTl: string;
   supplierId: number;
 };
+
+/** Mevcut fatura / stok girisini duzenleme */
+export type EditReceiveInvoice =
+  | {
+      kind: "batch";
+      batchId: string;
+      supplierId: number;
+      cart: ReceiveCartLine[];
+      invoiceTotalPaidTl: string;
+    }
+  | {
+      kind: "single";
+      movementId: number;
+      supplierId: number;
+      cart: ReceiveCartLine[];
+      invoiceTotalPaidTl: string;
+    };

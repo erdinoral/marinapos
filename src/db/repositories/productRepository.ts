@@ -19,10 +19,15 @@ import {
 } from "../../utils/fifoStockCost";
 import { computeStockAddCosts, lineCostKurusFromUnit } from "../../utils/stockCost";
 import { productHasSupplier, normalizeAlternateSupplierIds } from "../../utils/productSuppliers";
+import { isDeletableStockEntryRow } from "../../utils/stockEntryDelete";
 import { categorySaleUnitOf, formatQtyShort } from "../../utils/saleUnit";
-import { JsonStore } from "../store";
+import { JsonStore, type StockMovement } from "../store";
 
 const STOCK_PURCHASE_EXPENSE_CATEGORY = "Mal alimi / stok";
+
+function isDeletableStockReceiveMovement(m: Pick<StockMovement, "type" | "productId" | "note">): boolean {
+  return m.type === "in" && isDeletableStockEntryRow(m);
+}
 
 export class ProductRepository {
   constructor(private store: JsonStore) {}
@@ -565,24 +570,12 @@ export class ProductRepository {
       .sort((a, b) => a.stockQty - b.stockQty);
   }
 
-  /** Stok girisi kaydini geri alir: stok, FIFO, gunluk gider ve tedarikci borcu. Yalnizca urunun en son girisi silinebilir. */
-  deleteStockEntry(movementId: number): void {
-    const state = this.store.getState();
-    const mid = Math.floor(Number(movementId));
-    const idx = state.stockMovements.findIndex((m) => m.id === mid);
+  private removeStockMovementInPlace(
+    state: ReturnType<JsonStore["getState"]>,
+    movement: StockMovement
+  ): void {
+    const idx = state.stockMovements.indexOf(movement);
     if (idx < 0) throw new Error("Stok girisi bulunamadi.");
-    const movement = state.stockMovements[idx];
-    if (movement.type !== "in") throw new Error("Yalnizca stok girisi kaydi silinebilir.");
-
-    const newerForProduct = state.stockMovements.some(
-      (m) =>
-        m.type === "in" &&
-        m.productId === movement.productId &&
-        (m.createdAt > movement.createdAt || (m.createdAt === movement.createdAt && m.id > movement.id))
-    );
-    if (newerForProduct) {
-      throw new Error("Once bu urunun daha yeni stok girisini silin.");
-    }
 
     const product = state.products.find((p) => p.id === movement.productId);
     if (!product) throw new Error("Urun bulunamadi.");
@@ -618,12 +611,81 @@ export class ProductRepository {
     }
 
     state.stockMovements.splice(idx, 1);
+  }
+
+  private assertLatestDeletableReceive(
+    state: ReturnType<JsonStore["getState"]>,
+    movement: StockMovement,
+    excludeBatchId?: string
+  ): void {
+    const batchExcl = excludeBatchId?.trim();
+    const newerForProduct = state.stockMovements.some(
+      (m) =>
+        isDeletableStockReceiveMovement(m) &&
+        m.productId === movement.productId &&
+        (batchExcl == null || m.receiveBatchId?.trim() !== batchExcl) &&
+        (m.createdAt > movement.createdAt || (m.createdAt === movement.createdAt && m.id > movement.id))
+    );
+    if (newerForProduct) {
+      const product = state.products.find((p) => p.id === movement.productId);
+      const label = product?.name ?? `Urun #${movement.productId}`;
+      throw new Error(`"${label}" icin daha yeni stok girisi var. Once onu silin.`);
+    }
+  }
+
+  /** Stok girisi kaydini geri alir: stok, FIFO, gunluk gider ve tedarikci borcu. Yalnizca urunun en son girisi silinebilir. */
+  deleteStockEntry(movementId: number, productId?: number): void {
+    const state = this.store.getState();
+    const mid = Math.floor(Number(movementId));
+    const pid = productId != null ? Math.floor(Number(productId)) : undefined;
+    const movement = state.stockMovements.find(
+      (m) => m.id === mid && (pid == null || pid <= 0 || m.productId === pid)
+    );
+    if (!movement) throw new Error("Stok girisi bulunamadi.");
+    if (!isDeletableStockReceiveMovement(movement)) {
+      throw new Error("Yalnizca gelen stok girisi silinebilir (satis iadesi ve borc odemesi silinmez).");
+    }
+    this.assertLatestDeletableReceive(state, movement);
+    this.removeStockMovementInPlace(state, movement);
+    this.store.save();
+  }
+
+  /** Toplu fatura (SRB-*) grubunun tum kalemlerini geri alir. */
+  deleteStockReceiveBatch(receiveBatchId: string): void {
+    const state = this.store.getState();
+    const batchId = String(receiveBatchId ?? "").trim();
+    if (!batchId.startsWith("SRB-")) throw new Error("Gecersiz fatura grubu.");
+
+    const movements = state.stockMovements
+      .filter((m) => m.receiveBatchId?.trim() === batchId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id - a.id);
+
+    if (movements.length === 0) throw new Error("Fatura grubu bulunamadi.");
+    if (!movements.every(isDeletableStockReceiveMovement)) {
+      throw new Error("Fatura grubunda silinemez kayit var.");
+    }
+
+    for (const movement of movements) {
+      this.assertLatestDeletableReceive(state, movement, batchId);
+    }
+
+    for (const movement of movements) {
+      this.removeStockMovementInPlace(state, movement);
+    }
     this.store.save();
   }
 
   listStockEntryLog(limit = 250): StockEntryLogRow[] {
     const state = this.store.getState();
     const nameById = new Map(state.products.map((p) => [p.id, p]));
+    const latestDeletableByProduct = new Map<number, number>();
+    for (const m of state.stockMovements
+      .filter(isDeletableStockReceiveMovement)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id - a.id)) {
+      if (!latestDeletableByProduct.has(m.productId)) {
+        latestDeletableByProduct.set(m.productId, m.id);
+      }
+    }
     return state.stockMovements
       .filter((m) => m.type === "in")
       .slice()
@@ -682,7 +744,9 @@ export class ProductRepository {
           ...(m.amountPaidKurus != null && m.amountPaidKurus >= 0 ? { amountPaidKurus: m.amountPaidKurus } : {}),
           ...(m.debtAddedKurus != null && m.debtAddedKurus > 0 ? { debtAddedKurus: m.debtAddedKurus } : {}),
           ...(m.receiveBatchId?.trim() ? { receiveBatchId: m.receiveBatchId.trim() } : {}),
-          saleUnit
+          saleUnit,
+          canDelete:
+            isDeletableStockReceiveMovement(m) && latestDeletableByProduct.get(m.productId) === m.id
         };
       });
   }

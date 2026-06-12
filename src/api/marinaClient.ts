@@ -58,7 +58,10 @@ function createDevServerMarinaApi(): MarinaApi {
     lowStock: () => devInvoke("products:low-stock"),
     getStockEntryLog: () => devInvoke("products:stock-entry-log"),
     getStockMovementLog: () => devInvoke("products:stock-movement-log"),
-    deleteStockEntry: (movementId: number) => devInvoke("products:delete-stock-entry", [movementId]),
+    deleteStockEntry: (movementId: number, productId?: number) =>
+      devInvoke("products:delete-stock-entry", [movementId, productId]),
+    deleteStockReceiveBatch: (receiveBatchId: string) =>
+      devInvoke("products:delete-stock-receive-batch", [receiveBatchId]),
     selectImage: (suggestedName?: string) => devInvoke("media:select-image", [suggestedName ?? ""]),
     getMediaDirectory: () => devInvoke("media:get-dir"),
     readImageAsDataUrl: (fullPath) => devInvoke("media:read-image-data-url", [fullPath]),

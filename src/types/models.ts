@@ -513,6 +513,8 @@ export interface StockEntryLogRow {
   cashflowEntryId?: number;
   saleUnit?: CategorySaleUnit;
   receiveBatchId?: string;
+  /** Stok ekraninda Sil dugmesi (yalnizca gelen stok, urunun son girisi) */
+  canDelete?: boolean;
 }
 
 /** Tütün / aroma kartlari (icerik bilgisi) */
@@ -697,7 +699,8 @@ declare global {
       getStockAging: () => Promise<StockAgingRow[]>;
       getStockEntryLog: () => Promise<StockEntryLogRow[]>;
       getStockMovementLog: () => Promise<StockMovementLogRow[]>;
-      deleteStockEntry: (movementId: number) => Promise<void>;
+      deleteStockEntry: (movementId: number, productId?: number) => Promise<void>;
+      deleteStockReceiveBatch: (receiveBatchId: string) => Promise<void>;
       getSettings: () => Promise<Settings>;
       setOpeningTime: (openingTime: string) => Promise<void>;
       setClosureTime: (closureTime: string) => Promise<void>;

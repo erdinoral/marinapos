@@ -20,6 +20,25 @@ import { migrateFifoLayersForProducts } from "../utils/fifoStockCost";
 import { normalizeAlternateSupplierIds } from "../utils/productSuppliers";
 import { gramPriceKurusMigrate } from "../utils/saleUnit";
 
+/** Eski/yedek veride ayni id veya id=0 olan hareketler silmeyi bozar */
+function ensureUniqueStockMovementIds(store: MarinaStore): void {
+  const seen = new Set<number>();
+  let maxId = Math.max(0, Math.floor(Number(store.sequences.stockMovementId) || 0));
+  for (const m of store.stockMovements) {
+    if (m.id > 0 && !seen.has(m.id)) {
+      seen.add(m.id);
+      if (m.id > maxId) maxId = m.id;
+      continue;
+    }
+    maxId += 1;
+    m.id = maxId;
+    seen.add(maxId);
+  }
+  if (maxId > store.sequences.stockMovementId) {
+    store.sequences.stockMovementId = maxId;
+  }
+}
+
 export interface SaleItem {
   id: number;
   saleId: number;
@@ -462,6 +481,7 @@ export class JsonStore {
         stockReceiveBatchId: Math.max(parsed.sequences?.stockReceiveBatchId ?? 0, 0)
       }
     };
+    ensureUniqueStockMovementIds(store);
     migrateFifoLayersForProducts(store);
     return store;
   }

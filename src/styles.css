@@ -4199,13 +4199,13 @@ body { background: #121212; color: #f3f3f3; }
     minmax(68px, 0.6fr)
     minmax(72px, 0.62fr)
     minmax(88px, 1.1fr)
-    minmax(44px, 52px);
+    minmax(40px, 44px);
   width: 100%;
-  min-width: 820px;
+  min-width: 860px;
 }
 .stock-entry-col-actions {
   display: flex;
-  justify-content: flex-end;
+  justify-content: center;
   align-items: center;
   padding: 0 4px 0 8px;
   position: sticky;
@@ -4220,31 +4220,62 @@ body { background: #121212; color: #f3f3f3; }
 .stock-entry-row--picked .stock-entry-col-actions {
   background: rgba(184, 143, 67, 0.14);
 }
-.stock-entry-delete-btn {
-  min-width: 36px;
-  height: 26px;
-  padding: 0 8px;
+.stock-entry-menu-btn {
+  width: 32px;
+  height: 28px;
+  padding: 0;
   margin: 0;
   border-radius: 6px;
-  border: 1px solid #5a3030;
-  background: #2a1515;
-  color: #f0a8a8;
-  font-size: 10px;
+  border: 1px solid #444;
+  background: #222;
+  color: #d8d8d8;
+  font-size: 18px;
   line-height: 1;
+  letter-spacing: 0.02em;
   cursor: pointer;
-  white-space: nowrap;
 }
-.stock-entry-delete-btn:hover:not(:disabled) {
-  border-color: #c44;
-  background: #3d1a1a;
-  color: #ffc8c8;
+.stock-entry-menu-btn:hover:not(:disabled) {
+  border-color: #8a7340;
+  background: #2a2418;
+  color: #f0d9a0;
 }
-.stock-entry-delete-btn:disabled {
-  opacity: 0.35;
+.stock-entry-menu-btn:disabled {
+  opacity: 0.45;
   cursor: not-allowed;
-  border-color: #333;
-  background: #1a1a1a;
-  color: #666;
+}
+.stock-entry-action-menu {
+  z-index: 1500;
+}
+.stock-entry-menu-danger {
+  color: #f0a8a8 !important;
+}
+.stock-entry-menu-danger:hover:not(:disabled) {
+  background: #3d1a1a !important;
+}
+.stock-entry-menu-danger:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.stock-entry-single-detail-dl {
+  display: grid;
+  gap: 8px 16px;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  margin: 0;
+  font-size: 12px;
+}
+.stock-entry-single-detail-dl dt {
+  color: #999;
+  font-size: 11px;
+  margin: 0 0 2px;
+}
+.stock-entry-single-detail-dl dd {
+  margin: 0;
+  color: #e8e8e8;
+}
+.stock-entry-batch-note {
+  margin: 8px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid #2e2e2e;
 }
 .stock-entry-log-wrap {
   overflow-y: auto;
@@ -4276,6 +4307,33 @@ body { background: #121212; color: #f3f3f3; }
   background: #2a2418;
   outline: 1px solid #6b5528;
   outline-offset: -1px;
+}
+.stock-entry-batch-wrap {
+  border-bottom: 1px solid #2a2a2a;
+}
+.stock-entry-batch-wrap.is-open .stock-entry-row--batch {
+  background: #221e16;
+  outline: 1px solid #4a3c22;
+  outline-offset: -1px;
+}
+.stock-entry-row--batch strong {
+  color: #e8d4a8;
+  font-weight: 600;
+}
+.stock-entry-batch-detail {
+  padding: 0 8px 10px 8px;
+  margin: 0 0 4px;
+  background: #1a1814;
+  border: 1px solid #333028;
+  border-radius: 0 0 8px 8px;
+}
+.stock-entry-batch-table {
+  width: 100%;
+  font-size: 12px;
+}
+.stock-entry-batch-table th,
+.stock-entry-batch-table td {
+  padding: 6px 8px;
 }
 .stock-entry-row:last-child {
   border-bottom: none;
@@ -4578,6 +4636,7 @@ body { background: #121212; color: #f3f3f3; }
   display: flex;
   justify-content: space-between;
   gap: 10px;
+  width: 100%;
   padding: 8px 10px;
   border-radius: 8px;
   border: 1px solid #3a3018;
@@ -4585,6 +4644,43 @@ body { background: #121212; color: #f3f3f3; }
   color: #f0e6d8;
   font-size: 12px;
   text-align: left;
+  cursor: pointer;
+}
+.stock-receive-cart-line-main:hover:not(:disabled) {
+  border-color: #5a4a28;
+  background: #2a2418;
+}
+.stock-receive-cart-line-main.is-selected,
+.stock-receive-cart-list li.is-selected .stock-receive-cart-line-main {
+  border-color: #c9a962;
+  background: rgba(184, 143, 67, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(201, 169, 98, 0.35);
+}
+.stock-receive-cart-line-main:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.stock-receive-cart--edit {
+  margin-top: 4px;
+}
+.stock-receive-cart--edit-totals {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+.stock-receive-detail-panel--edit {
+  margin-top: 10px;
+}
+.stock-receive-edit-add-row {
+  display: flex;
+  justify-content: flex-start;
+  margin: 8px 0 4px;
+}
+.stock-receive-cart-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 12px;
 }
 .stock-receive-cart-line-remove {
   flex-shrink: 0;
@@ -4603,6 +4699,11 @@ body { background: #121212; color: #f3f3f3; }
 .stock-receive-cart-line-remove:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+.supplier-stock-batch-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
 }
 .supplier-stock-batch-list {
   list-style: none;

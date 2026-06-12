@@ -3,15 +3,17 @@ import type { StockEntryLogRow } from "../../types/models";
 import { formatTry } from "../../utils/currency";
 import { formatQtyShort } from "../../utils/saleUnit";
 import { stockEntryDisplayAmountKurus } from "../../utils/stockCost";
-import { groupStockEntriesIntoBatches } from "../../utils/supplierStockBatches";
+import { groupStockEntriesIntoBatches, type SupplierStockBatch } from "../../utils/supplierStockBatches";
 
 type Props = {
   entries: StockEntryLogRow[];
   formatTime: (iso: string) => string;
   unitCostLabel: (entry: Pick<StockEntryLogRow, "unitCostKurus" | "saleUnit">) => string;
+  canEditBatch?: (batch: SupplierStockBatch) => boolean;
+  onEditBatch?: (batch: SupplierStockBatch) => void;
 };
 
-export function SupplierStockBatchHistory({ entries, formatTime, unitCostLabel }: Props) {
+export function SupplierStockBatchHistory({ entries, formatTime, unitCostLabel, canEditBatch, onEditBatch }: Props) {
   const batches = useMemo(() => groupStockEntriesIntoBatches(entries), [entries]);
   const [openBatchId, setOpenBatchId] = useState<string | null>(null);
 
@@ -24,6 +26,7 @@ export function SupplierStockBatchHistory({ entries, formatTime, unitCostLabel }
       {batches.map((batch) => {
         const open = openBatchId === batch.batchId;
         const isMulti = batch.lines.length > 1 || batch.batchId.startsWith("SRB-");
+        const editable = Boolean(onEditBatch && canEditBatch?.(batch));
         return (
           <li key={batch.batchId} className={`supplier-stock-batch${open ? " is-open" : ""}`}>
             <button
@@ -47,6 +50,13 @@ export function SupplierStockBatchHistory({ entries, formatTime, unitCostLabel }
             </button>
             {open ? (
               <div className="supplier-stock-batch-detail">
+                {editable ? (
+                  <div className="supplier-stock-batch-actions">
+                    <button type="button" className="app-btn-secondary" onClick={() => onEditBatch?.(batch)}>
+                      Faturayi duzenle
+                    </button>
+                  </div>
+                ) : null}
                 <table className="cashflow-table supplier-stock-batch-table">
                   <thead>
                     <tr>

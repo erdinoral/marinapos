@@ -21,6 +21,10 @@ import type {
 import { SaleInvoiceModal } from "../invoice/SaleInvoiceModal";
 import { StockInventorySummary } from "../stock/StockInventorySummary";
 import { SupplierStockBatchHistory } from "./SupplierStockBatchHistory";
+import { buildEditInvoiceFromBatch, buildEditInvoiceFromSingleRow } from "../../utils/stockBatchEdit";
+import { isBulkReceiveBatchId, latestDeletableMovementIdByProduct, stockEntryRowsCanEdit } from "../../utils/stockEntryDelete";
+import type { SupplierStockBatch } from "../../utils/supplierStockBatches";
+import type { EditReceiveInvoice } from "../stock/receiveStockTypes";
 import { invoiceInfoFromCustomer } from "../../utils/invoiceFromCustomer";
 import { canCreateInvoiceForSale } from "../../utils/invoiceFromSale";
 import { computeInventoryTotals } from "../../utils/inventoryTotals";
@@ -83,6 +87,7 @@ interface Props {
   onOpenSaleDetail: (saleId: number) => void;
   onSuppliersChange?: () => void;
   onCustomersChange?: () => void;
+  onEditStockInvoice?: (edit: EditReceiveInvoice) => void;
 }
 
 export function CustomersPanel({
@@ -97,7 +102,8 @@ export function CustomersPanel({
   onCustomPricesChange,
   onOpenSaleDetail,
   onSuppliersChange,
-  onCustomersChange
+  onCustomersChange,
+  onEditStockInvoice
 }: Props) {
   const [search, setSearch] = useState("");
   const [selection, setSelection] = useState<Selection>(null);
@@ -122,6 +128,30 @@ export function CustomersPanel({
   const [productPrices, setProductPrices] = useState<CustomerProductPrice[]>([]);
   const [supplierOverview, setSupplierOverview] = useState<SupplierOverview | null>(null);
   const [costLayers, setCostLayers] = useState<StockCostLayer[]>([]);
+  const supplierStockEntries = supplierOverview?.stockEntries ?? [];
+  const supplierLatestDeletable = useMemo(
+    () => latestDeletableMovementIdByProduct(supplierStockEntries),
+    [supplierStockEntries]
+  );
+
+  const canEditSupplierStockBatch = useCallback(
+    (batch: SupplierStockBatch) =>
+      stockEntryRowsCanEdit(batch.lines, supplierLatestDeletable, supplierStockEntries),
+    [supplierLatestDeletable, supplierStockEntries]
+  );
+
+  const handleEditSupplierStockBatch = useCallback(
+    (batch: SupplierStockBatch) => {
+      if (!onEditStockInvoice) return;
+      const batchId = batch.batchId.trim();
+      const edit =
+        isBulkReceiveBatchId(batchId) && batch.lines.length > 1
+          ? buildEditInvoiceFromBatch(batchId, batch.lines)
+          : buildEditInvoiceFromSingleRow(batch.lines[0]);
+      onEditStockInvoice(edit);
+    },
+    [onEditStockInvoice]
+  );
 
   const [ledgerTab, setLedgerTab] = useState<CustomersPanelColumn>("retail");
   const [ledgerAddOpen, setLedgerAddOpen] = useState(false);
@@ -1195,6 +1225,8 @@ export function CustomersPanel({
                 entries={supplierOverview.stockEntries.slice(0, 100)}
                 formatTime={formatSaleDateTime}
                 unitCostLabel={stockEntryUnitCostLabel}
+                canEditBatch={onEditStockInvoice ? canEditSupplierStockBatch : undefined}
+                onEditBatch={onEditStockInvoice ? handleEditSupplierStockBatch : undefined}
               />
             </div>
           )}
