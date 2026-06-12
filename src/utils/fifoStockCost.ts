@@ -29,6 +29,15 @@ export function syncProductCostFromFifo(state: FifoStateSlice, productId: number
   if (head > 0) p.costPriceKurus = head;
 }
 
+/** Gelen stoktan FIFO'ya yazilacak miktar: once eksiye dusen satis borcu kapanir */
+export function fifoQtyForStockAdd(stockBefore: number, addQty: number, saleUnit: CategorySaleUnit): number {
+  const add = saleUnit === "gram" ? Math.max(0, Math.round(addQty)) : Math.max(0, Math.round(addQty));
+  if (add <= 0) return 0;
+  const before = saleUnit === "gram" ? Math.round(stockBefore) : Math.round(stockBefore);
+  const after = before + add;
+  return Math.max(0, after) - Math.max(0, before);
+}
+
 /** Stok girisi: sondaki parti ile ayni birim fiyat ise birlestir; degilse yeni parti */
 export function pushFifoLayer(
   state: FifoStateSlice,

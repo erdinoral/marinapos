@@ -3507,6 +3507,9 @@ body { background: #121212; color: #f3f3f3; }
   background: rgba(201, 162, 39, 0.08);
   font-size: 0.9rem;
 }
+.stock-receive-deficit-hint {
+  color: #e8a0a0;
+}
 .stock-receive-bulk-callout--draft {
   border-color: rgba(72, 187, 120, 0.45);
   background: rgba(72, 187, 120, 0.1);

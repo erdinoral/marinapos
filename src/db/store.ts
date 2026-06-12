@@ -309,7 +309,7 @@ export class JsonStore {
         wholesalePriceKurus: isGram ? gramPriceKurusMigrate(wholesalePriceKurus) : wholesalePriceKurus,
         alternatePriceKurus: isGram ? gramPriceKurusMigrate(alternatePriceKurus) : alternatePriceKurus,
         posFavorite: pp.posFavorite === 1 ? 1 : 0,
-        stockQty: Math.max(0, Math.round(Number(p.stockQty ?? 0)))
+        stockQty: Math.round(Number(p.stockQty ?? 0))
       };
     });
 

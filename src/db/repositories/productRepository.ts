@@ -10,7 +10,13 @@ import {
   SupplierInput,
   SupplierOverview
 } from "../../types/models";
-import { activeFifoUnitCostKurus, pushFifoLayer, resetFifoLayersToQty, reverseStockAddFifo } from "../../utils/fifoStockCost";
+import {
+  activeFifoUnitCostKurus,
+  fifoQtyForStockAdd,
+  pushFifoLayer,
+  resetFifoLayersToQty,
+  reverseStockAddFifo
+} from "../../utils/fifoStockCost";
 import { computeStockAddCosts, lineCostKurusFromUnit } from "../../utils/stockCost";
 import { productHasSupplier, normalizeAlternateSupplierIds } from "../../utils/productSuppliers";
 import { categorySaleUnitOf, formatQtyShort } from "../../utils/saleUnit";
@@ -429,7 +435,15 @@ export class ProductRepository {
     movementNote += "; FIFO parti";
     if (supplier) movementNote += ` · ${supplier.name}`;
 
+    const stockBefore = product.stockQty;
     product.stockQty += quantity;
+    const fifoQty = fifoQtyForStockAdd(stockBefore, quantity, saleUnit);
+    if (stockBefore < 0) {
+      const covered = Math.min(quantity, Math.max(0, -stockBefore));
+      if (covered > 0) {
+        movementNote += `; eksik satis kapanisi ${formatQtyShort(covered, saleUnit)}`;
+      }
+    }
     state.sequences.stockMovementId += 1;
     const movementId = state.sequences.stockMovementId;
 
@@ -492,7 +506,9 @@ export class ProductRepository {
       ...(cashflowEntryId != null ? { cashflowEntryId } : {}),
       ...(receiveBatchId ? { receiveBatchId } : {})
     });
-    pushFifoLayer(state, productId, quantity, costs.unitCostRecorded, saleUnit, movementId);
+    if (fifoQty > 0) {
+      pushFifoLayer(state, productId, fifoQty, costs.unitCostRecorded, saleUnit, movementId);
+    }
     this.store.save();
   }
 
@@ -572,11 +588,11 @@ export class ProductRepository {
     if (!product) throw new Error("Urun bulunamadi.");
     const saleUnit = categorySaleUnitOf(state.categories, product.categoryId);
     const qty = movement.qty;
-    if (product.stockQty < qty) {
-      throw new Error("Eldeki stok bu giristen az; satis veya sayim sonrasi silinemez.");
+    const stockBeforeDelete = product.stockQty;
+    const fifoReverseQty = fifoQtyForStockAdd(stockBeforeDelete - qty, qty, saleUnit);
+    if (fifoReverseQty > 0) {
+      reverseStockAddFifo(state, movement.productId, fifoReverseQty, saleUnit, movement.id);
     }
-
-    reverseStockAddFifo(state, movement.productId, qty, saleUnit, movement.id);
     product.stockQty -= qty;
 
     if (movement.cashflowEntryId != null && movement.cashflowEntryId > 0) {

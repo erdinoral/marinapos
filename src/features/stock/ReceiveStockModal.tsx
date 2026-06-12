@@ -3,7 +3,7 @@ import { getMarinaApi } from "../../api/marinaClient";
 import type { Category, CategorySaleUnit, Product, StockCostMode, Supplier } from "../../types/models";
 import { formatTry, parseTrAmount, tlToKurus } from "../../utils/currency";
 import { computeStockAddCosts } from "../../utils/stockCost";
-import { categorySaleUnitOf, formatQtyShort, incomingCostTlToUnitCostKurus } from "../../utils/saleUnit";
+import { bumpPieceQty, categorySaleUnitOf, formatQtyShort, incomingCostTlToUnitCostKurus } from "../../utils/saleUnit";
 import { StockCostFields } from "./StockCostFields";
 import { buildStockAddInput, defaultCostTlForProduct } from "./stockAddHelpers";
 import { productHasSupplier, productSupplierIds } from "../../utils/productSuppliers";
@@ -25,13 +25,6 @@ type Props = {
 
 function newCartLineId() {
   return `line-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-/** Adet: 1 iken +5 -> 5; 3 iken +10 -> 13 */
-function bumpPieceQty(current: number, add: number): number {
-  const q = Math.max(1, Math.round(Number(current)));
-  if (q === 1) return Math.max(1, Math.round(add));
-  return Math.max(1, q + Math.round(add));
 }
 
 function parseQty(raw: number, unit: CategorySaleUnit): number | null {
@@ -588,6 +581,9 @@ export function ReceiveStockModal({
                   <p className="stock-receive-product-name">{selectedProduct.name}</p>
                   <p className="stock-help small">
                     Mevcut: <strong>{formatQtyShort(selectedProduct.stockQty, unit)}</strong>
+                    {selectedProduct.stockQty < 0 ? (
+                      <span className="stock-receive-deficit-hint"> — eksik satis; giris once borcu kapatir</span>
+                    ) : null}
                   </p>
                   <label className="stock-receive-qty-label stock-receive-qty-label--inline">
                     {unit === "gram" ? "Eklenecek gram" : "Eklenecek adet"}
@@ -656,6 +652,9 @@ export function ReceiveStockModal({
             <p className="stock-receive-product-name">{selectedProduct.name}</p>
             <p className="stock-help small">
               Mevcut: <strong>{formatQtyShort(selectedProduct.stockQty, unit)}</strong>
+              {selectedProduct.stockQty < 0 ? (
+                <span className="stock-receive-deficit-hint"> — eksik satis; giris once borcu kapatir</span>
+              ) : null}
             </p>
             <label className="stock-receive-qty-label">
               {unit === "gram" ? "Eklenecek gram" : "Eklenecek adet"}

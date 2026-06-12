@@ -27,6 +27,7 @@ import { formatSaleTime } from "../../utils/saleFormat";
 import { buildReturnCartLinesFromSale } from "../../utils/saleReturnCart";
 import { saleMatchesCatalogFilter, type SaleCatalogUnitFilter } from "../../utils/saleListFilter";
 import {
+  bumpPieceQty,
   categorySaleUnitOf,
   defaultGramQtyForCart,
   formatQtyShort,
@@ -1101,6 +1102,24 @@ export function PosScreen({
                   return { ...item, qty: Math.max(0, next) };
                 })
                 .filter((item) => item.qty > 0)
+            }
+      )
+    );
+  };
+
+  const bumpCartQty = (productId: number, priceSource: CartPriceSource, add: number) => {
+    const product = products.find((p) => p.id === productId);
+    if (!product || saleUnitFor(categories, product) === "gram") return;
+    setCarts((prev) =>
+      prev.map((cartRow) =>
+        cartRow.id !== activeCartId
+          ? cartRow
+          : {
+              ...cartRow,
+              items: cartRow.items.map((item) => {
+                if (item.id !== productId || item.priceSource !== priceSource) return item;
+                return { ...item, qty: bumpPieceQty(item.qty, add) };
+              })
             }
       )
     );
@@ -2321,10 +2340,10 @@ export function PosScreen({
                                 </button>
                               </div>
                               <div className="cart-qty-bump" aria-label="Adet hizli artir">
-                                <button type="button" onClick={() => changeQty(item.id, item.priceSource, 5)}>
+                                <button type="button" onClick={() => bumpCartQty(item.id, item.priceSource, 5)}>
                                   +5
                                 </button>
-                                <button type="button" className="cart-qty-bump-10" onClick={() => changeQty(item.id, item.priceSource, 10)}>
+                                <button type="button" className="cart-qty-bump-10" onClick={() => bumpCartQty(item.id, item.priceSource, 10)}>
                                   +10
                                 </button>
                               </div>

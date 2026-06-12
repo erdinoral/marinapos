@@ -23,7 +23,7 @@ import { formatTry } from "../../utils/currency";
 import { resolveStockEntryUnitCostKurus, stockCostModeLabel } from "../../utils/stockCost";
 import { computeInventoryTotals, lineInventoryCostKurus } from "../../utils/inventoryTotals";
 import { StockInventorySummary } from "./StockInventorySummary";
-import { productSupplierLabel } from "../../utils/productSuppliers";
+import { productHasSupplier, productSupplierLabel } from "../../utils/productSuppliers";
 import { BarcodePrintModal } from "./BarcodePrintModal";
 import { bulkInvoiceDraftSummary } from "./bulkInvoiceDraft";
 import { ReceiveStockModal } from "./ReceiveStockModal";
@@ -67,6 +67,7 @@ export function StockScreen({ products, lowStock, categories, suppliers, lowStoc
   const [listQuery, setListQuery] = useState("");
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<number>(0);
+  const [lowStockSupplierFilter, setLowStockSupplierFilter] = useState<number>(0);
   const [agingRows, setAgingRows] = useState<StockAgingRow[]>([]);
   const [entryLog, setEntryLog] = useState<StockEntryLogRow[]>([]);
   const [stockMainTab, setStockMainTab] = useState<"manage" | "history">("manage");
@@ -119,6 +120,11 @@ export function StockScreen({ products, lowStock, categories, suppliers, lowStoc
   );
 
   const listFiltered = useMemo(() => filterProducts(listQuery), [filterProducts, listQuery]);
+
+  const lowStockFiltered = useMemo(() => {
+    if (lowStockSupplierFilter <= 0) return lowStock;
+    return lowStock.filter((p) => productHasSupplier(p, lowStockSupplierFilter));
+  }, [lowStock, lowStockSupplierFilter]);
 
   const selectProduct = useCallback((product: Product) => {
     setSelectedId(product.id);
@@ -316,10 +322,14 @@ export function StockScreen({ products, lowStock, categories, suppliers, lowStoc
   const supplierLabel = (p: Product) => productSupplierLabel(p, supplierNameById);
 
   const printLowStockList = () => {
-    const rows = lowStock
+    const supplierNote =
+      lowStockSupplierFilter > 0
+        ? ` — Tedarikci: ${supplierNameById.get(lowStockSupplierFilter) ?? lowStockSupplierFilter}`
+        : "";
+    const rows = lowStockFiltered
       .map((p) => {
         const unit = categorySaleUnitOf(categories, p.categoryId);
-        return `<tr><td>${p.name}</td><td>${p.code}</td><td style="text-align:right">${formatQtyShort(p.stockQty, unit)}</td></tr>`;
+        return `<tr><td>${p.name}</td><td>${p.code}</td><td>${supplierLabel(p)}</td><td style="text-align:right">${formatQtyShort(p.stockQty, unit)}</td></tr>`;
       })
       .join("");
     const html = `<!doctype html><html lang="tr"><head><meta charset="utf-8"/><title>Eksik Stok Listesi</title>
@@ -328,9 +338,9 @@ body{font-family:Arial,sans-serif;padding:20px;color:#111} h1{margin:0 0 6px} p{
 table{width:100%;border-collapse:collapse} th,td{border:1px solid #999;padding:8px;font-size:12px;text-align:left}
 </style></head><body>
 <h1>Eksik Stok Listesi</h1>
-<p>Esik: adetli urunlerde ${lowStockThreshold} adet, gramajli urunlerde 1000 g alti.</p>
-<table><thead><tr><th>Urun</th><th>Kod</th><th>Stok</th></tr></thead><tbody>
-${rows || `<tr><td colspan="3">Eksik urun yok</td></tr>`}
+<p>Esik: adetli urunlerde ${lowStockThreshold} adet, gramajli urunlerde 1000 g alti.${supplierNote}</p>
+<table><thead><tr><th>Urun</th><th>Kod</th><th>Tedarikci</th><th>Stok</th></tr></thead><tbody>
+${rows || `<tr><td colspan="4">Eksik urun yok</td></tr>`}
 </tbody></table>
 </body></html>`;
     const frame = document.createElement("iframe");
@@ -601,9 +611,21 @@ ${rows || `<tr><td colspan="3">Eksik urun yok</td></tr>`}
               <span className="stock-panel-list-actions-spacer" aria-hidden="true" />
             )}
           </div>
+          <select
+            value={lowStockSupplierFilter}
+            onChange={(e) => setLowStockSupplierFilter(Number(e.target.value))}
+            aria-label="Eksik liste tedarikci filtresi"
+          >
+            <option value={0}>Tum tedarikciler</option>
+            {suppliers.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
         </div>
         <div className="stock-scroll-body stock-scroll-body--list">
-          {lowStock.map((p) => (
+          {lowStockFiltered.map((p) => (
             <motion.div
               key={p.id}
               id={`stock-low-row-${p.id}`}
@@ -626,11 +648,18 @@ ${rows || `<tr><td colspan="3">Eksik urun yok</td></tr>`}
               }}
               onContextMenu={(e) => openStockRowContextMenu(e, p)}
             >
-              <span>{p.name}</span>
+              <span className="stock-row-main-text">
+                {p.name}
+                <small className="product-card-meta">Tedarikci: {supplierLabel(p)}</small>
+              </span>
               <span>{stockLabelForProduct(p)}</span>
             </motion.div>
           ))}
-          {lowStock.length === 0 && <p className="stock-help small">Eksik urun yok.</p>}
+          {lowStock.length === 0 ? (
+            <p className="stock-help small">Eksik urun yok.</p>
+          ) : lowStockFiltered.length === 0 ? (
+            <p className="stock-help small">Bu tedarikci icin eksik urun yok.</p>
+          ) : null}
         </div>
       </section>
       ) : null}

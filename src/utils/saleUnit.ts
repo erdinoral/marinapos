@@ -35,6 +35,14 @@ export function formatQtyShort(qty: number, unit: CategorySaleUnit): string {
   return `${n} adet`;
 }
 
+/** Adet: 1 iken +5 -> 5; 3 iken +10 -> 13 */
+export function bumpPieceQty(current: number, add: number): number {
+  const q = Math.max(1, Math.round(Number(current)));
+  const a = Math.round(Number(add));
+  if (q === 1) return Math.max(1, a);
+  return Math.max(1, q + a);
+}
+
 /** Sepet / satis: gram tam sayi, en az 1 (stok girisi / sayim) */
 export function normalizeGramQty(grams: number): number {
   return Math.max(1, Math.round(Number(grams) || 0));
@@ -84,7 +92,7 @@ export function productStockBadgeLevel(
   lowStockThreshold = 10
 ): ProductStockBadgeLevel {
   const unit = categorySaleUnitOf(categories, product.categoryId);
-  const qty = unit === "gram" ? Math.max(0, Math.round(product.stockQty)) : product.stockQty;
+  const qty = unit === "gram" ? Math.round(product.stockQty) : product.stockQty;
   if (qty <= 0) return "empty";
   if (unit === "gram") {
     const limit = lowStockQtyLimit(categories, product.categoryId, lowStockThreshold);
