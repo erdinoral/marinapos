@@ -1,60 +1,63 @@
-export const APP_VERSION = "1.8.6";
-export const APP_RELEASE_DATE = "11 Haziran 2026";
+export const APP_VERSION = "1.8.7";
+export const APP_RELEASE_DATE = "10 Haziran 2026";
 
 /** Hesap → Surumler ekraninda kartlar */
 export const APP_RELEASE_NOTES: { title: string; body: string }[] = [
   {
-    title: "Eksi stok duzeltmesi",
+    title: "Stok fatura gruplama",
+    body:
+      "Toplu fatura kalemleri gecmiste tek satirda; tiklayinca detay tablosu acilir. Ayni saniyedeki eski kayitlar da gruplanir."
+  },
+  {
+    title: "Fatura islem menusu",
+    body:
+      "Stok gecmisinde ⋯ ve sag tik: Faturayi gor, duzelt, sil. Satira tiklamak yalnizca detay acar; duzenleme menuden."
+  },
+  {
+    title: "Fatura duzenleme",
+    body:
+      "Faturayi duzelt modunda kaleme tiklayarak adet ve birim fiyat guncellenir; toplu fatura tamami silinebilir."
+  },
+  {
+    title: "Stok girisi silme",
+    body:
+      "Yalnizca en son giris silinebilir; SRB toplu faturada tek satirdan tum fatura silinir. Iade ve borc odemeleri karismaz."
+  },
+  {
+    title: "Eksi stok (1.8.6)",
     body:
       "Stoksuz satis sonrasi eksi bakiye korunur; stok girisinde once eksik kapanir, FIFO dogru yazilir."
-  },
-  {
-    title: "Eksik liste tedarikci filtresi",
-    body:
-      "Eksik listede firmaya gore filtre; birincil ve ek tedarikci bagli urunler listelenir."
-  },
-  {
-    title: "Sepet +5 / +10",
-    body:
-      "Adet 1 iken +5 -> 5, +10 -> 10; diger adetlerde uzerine eklenir (ornek 3 +10 = 13)."
   },
   {
     title: "Toplu fatura (1.8.5)",
     body:
       "Yarim kalan liste taslak, odenen tutar, liste Sil butonu, urunu sil."
-  },
-  {
-    title: "Coklu tedarikci (1.8.4)",
-    body:
-      "Birincil + ek tedarikci; toplu fatura ve stok girisi karttaki firmalara gore calisir."
-  },
-  {
-    title: "AI Asistan (1.8.4)",
-    body:
-      "Sag kenar burger menusu ve yan panel; tum ekranlarda erisilebilir."
   }
 ];
 
 /** GitHub Release / electron-updater changelog */
-export const RELEASE_CHANGELOG_MD = `## Marina Nargile POS 1.8.6
+export const RELEASE_CHANGELOG_MD = `## Marina Nargile POS 1.8.7
 
 Kurulu uygulamalar **Ayarlar → Guncelleme** uzerinden bu surumu indirebilir. Verileriniz korunur; yine de yayin oncesi yedek almaniz onerilir.
 
 ### Yeni
 
-#### Eksi stok
-- Stoksuz satista **eksi stok** kaydedilir ve uygulama yeniden acilinca korunur
-- Stok girisinde gelen miktar once **eksik satis borcunu** kapatir; yalnizca kalan miktar FIFO'ya yazilir
-- Stok girisi modalinda eksi stok uyarisi
+#### Stok ekleme gecmisi
+- **Toplu fatura** kalemleri tek satirda gruplanir; tiklayinca kalem detayi acilir
+- Eski kayitlar (SRB olmadan ayni saniye + tedarikci) otomatik gruplanir
+- **⋯ menusu** ve **sag tik**: Faturayi gor, duzelt, sil
+- Satira tiklamak yalnizca detay gosterir; duzenleme menuden yapilir
 
-#### Eksik liste
-- **Tedarikci filtresi** (birincil + ek tedarikci dahil)
-- Yazdirma secili filtreyi kullanir
+#### Fatura duzenleme
+- **Faturayi duzelt** ile mevcut fatura acilir
+- Listeden **kaleme tiklayarak** adet ve birim fiyat guncellenir
+- Toplu faturaya urun eklenebilir; kaydedince eski kayit yenilenir
 
-#### Sepet
-- **+5 / +10** adet butonlari: 1 iken dogrudan 5 veya 10; diger adetlerde uzerine ekler
+#### Stok girisi silme
+- Yalnizca urunun **en son stok girisi** silinebilir
+- Toplu faturada (SRB) bir satirdan **tum fatura** silinir
+- Iade ve tedarikci borc odeme satirlari karismaz
 
-### Onceki surumden (1.8.5 ozeti)
-- Toplu fatura taslak, odenen tutar, urunu sil
-- Coklu tedarikci, AI Asistan, satis gecmisi
+### Onceki surumden (1.8.6 ozeti)
+- Eksi stok duzeltmesi, eksik liste tedarikci filtresi, sepet +5/+10
 `;
