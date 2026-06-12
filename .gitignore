@@ -6,7 +6,7 @@ dist-electron/
 Thumbs.db
 .idea/
 .vscode/
-reports/
+/reports/
 data/
 release-notes.md
 release/
