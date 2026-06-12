@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -36,5 +38,24 @@ jobs:
       - name: Build and publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CI: true
         run: npm run build && npx electron-builder --win --publish always --config.npmRebuild=false
+
+      - name: Verify release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = (Get-Content package.json | ConvertFrom-Json).version
+          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; "User-Agent" = "marina-release-ci" }
+          $uri = "https://api.github.com/repos/erdinoral/marinapos/releases/tags/$tag"
+          try {
+            $r = Invoke-RestMethod -Uri $uri -Headers $headers
+            if ($r.draft) { throw "Release $tag taslak — yayinlanmamis" }
+            if ($r.assets.Count -lt 2) { throw "Release $tag eksik dosya (latest.yml / Setup.exe)" }
+            Write-Host "Release $tag OK ($($r.assets.Count) dosya)"
+          } catch {
+            Write-Error $_
+            exit 1
+          }

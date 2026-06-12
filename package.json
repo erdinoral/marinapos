@@ -100,7 +100,9 @@
     "publish": {
       "provider": "github",
       "owner": "erdinoral",
-      "repo": "marinapos"
+      "repo": "marinapos",
+      "releaseType": "release",
+      "vPrefixedTagName": false
     },
     "releaseInfo": {
       "releaseNotesFile": "release-notes.md"
