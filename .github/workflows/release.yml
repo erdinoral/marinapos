@@ -6,6 +6,12 @@ on:
       - "*.*.*"
       - "v*.*.*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (ornegin 1.8.8 — v on eki olmadan da olur)"
+        required: true
+        default: "1.8.8"
+        type: string
 
 permissions:
   contents: write
@@ -22,6 +28,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
