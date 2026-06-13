@@ -1,63 +1,47 @@
-export const APP_VERSION = "1.8.7";
-export const APP_RELEASE_DATE = "10 Haziran 2026";
+export const APP_VERSION = "1.8.8";
+export const APP_RELEASE_DATE = "13 Haziran 2026";
 
 /** Hesap → Surumler ekraninda kartlar */
 export const APP_RELEASE_NOTES: { title: string; body: string }[] = [
   {
-    title: "Stok fatura gruplama",
+    title: "Lisans / guncelleme duzeltmesi",
     body:
-      "Toplu fatura kalemleri gecmiste tek satirda; tiklayinca detay tablosu acilir. Ayni saniyedeki eski kayitlar da gruplanir."
+      "Otomatik guncelleme sonrasi lisans sunucusu bulunamama hatasi giderildi. CI build'e Supabase yapilandirmasi dahil edilir."
   },
   {
-    title: "Fatura islem menusu",
+    title: "Stok fatura gruplama (1.8.7)",
     body:
-      "Stok gecmisinde ⋯ ve sag tik: Faturayi gor, duzelt, sil. Satira tiklamak yalnizca detay acar; duzenleme menuden."
+      "Toplu fatura kalemleri gecmiste tek satirda; ⋯ menusu ile gor, duzelt, sil."
   },
   {
-    title: "Fatura duzenleme",
+    title: "Fatura duzenleme (1.8.7)",
     body:
-      "Faturayi duzelt modunda kaleme tiklayarak adet ve birim fiyat guncellenir; toplu fatura tamami silinebilir."
+      "Faturayi duzelt modunda kaleme tiklayarak adet ve birim fiyat guncellenir."
   },
   {
-    title: "Stok girisi silme",
+    title: "Stok girisi silme (1.8.7)",
     body:
-      "Yalnizca en son giris silinebilir; SRB toplu faturada tek satirdan tum fatura silinir. Iade ve borc odemeleri karismaz."
+      "Yalnizca en son giris silinebilir; SRB toplu faturada tum fatura silinir."
   },
   {
     title: "Eksi stok (1.8.6)",
     body:
-      "Stoksuz satis sonrasi eksi bakiye korunur; stok girisinde once eksik kapanir, FIFO dogru yazilir."
-  },
-  {
-    title: "Toplu fatura (1.8.5)",
-    body:
-      "Yarim kalan liste taslak, odenen tutar, liste Sil butonu, urunu sil."
+      "Stoksuz satis sonrasi eksi bakiye korunur; stok girisinde once eksik kapanir."
   }
 ];
 
 /** GitHub Release / electron-updater changelog */
-export const RELEASE_CHANGELOG_MD = `## Marina Nargile POS 1.8.7
+export const RELEASE_CHANGELOG_MD = `## Marina Nargile POS 1.8.8
 
 Kurulu uygulamalar **Ayarlar → Guncelleme** uzerinden bu surumu indirebilir. Verileriniz korunur; yine de yayin oncesi yedek almaniz onerilir.
 
-### Yeni
+### Duzeltme
 
-#### Stok ekleme gecmisi
-- **Toplu fatura** kalemleri tek satirda gruplanir; tiklayinca kalem detayi acilir
-- Eski kayitlar (SRB olmadan ayni saniye + tedarikci) otomatik gruplanir
-- **⋯ menusu** ve **sag tik**: Faturayi gor, duzelt, sil
-- Satira tiklamak yalnizca detay gosterir; duzenleme menuden yapilir
+#### Lisans / otomatik guncelleme
+- GitHub Actions ile uretilen kurulum dosyasina **Supabase lisans yapilandirmasi** artik dahil edilir
+- Guncelleme sonrasi **"Yapilandirma eksik"** hatasi giderildi
+- Son gecerli lisans oturumu varsa gecici olarak acilisa izin verilir (7 gun)
 
-#### Fatura duzenleme
-- **Faturayi duzelt** ile mevcut fatura acilir
-- Listeden **kaleme tiklayarak** adet ve birim fiyat guncellenir
-- Toplu faturaya urun eklenebilir; kaydedince eski kayit yenilenir
-
-#### Stok girisi silme
-- Yalnizca urunun **en son stok girisi** silinebilir
-- Toplu faturada (SRB) bir satirdan **tum fatura** silinir
-- Iade ve tedarikci borc odeme satirlari karismaz
-
-### Onceki surumden (1.8.6 ozeti)
-- Eksi stok duzeltmesi, eksik liste tedarikci filtresi, sepet +5/+10
+### Onceki surumden (1.8.7 ozeti)
+- Stok fatura gruplama, ⋯ menusu, fatura duzenleme ve silme
 `;

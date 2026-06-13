@@ -82,6 +82,7 @@ export function evaluateLicense(input: {
   fetchFailed: boolean;
   licenseBackendConfigured: boolean;
   isDevBypass: boolean;
+  hasActivationKey?: boolean;
 }): LicenseStatus {
   const base = {
     deviceId: input.deviceId,
@@ -93,15 +94,24 @@ export function evaluateLicense(input: {
     return { ...base, state: "active", message: "", canRetry: false };
   }
 
+  const grace = Math.max(1, Math.floor(input.registry?.offlineGraceDays ?? LICENSE_OFFLINE_GRACE_DAYS_DEFAULT));
+
   if (!input.licenseBackendConfigured) {
+    if (input.hasActivationKey && input.lastOkAt && daysSince(input.lastOkAt) <= grace) {
+      return {
+        ...base,
+        state: "active",
+        message:
+          "Lisans sunucusu yapilandirmasi eksik; son gecerli oturum kullaniliyor. Destek ile iletisime gecin.",
+        canRetry: true
+      };
+    }
     return {
       ...base,
       state: "config_missing",
       message: "Lisans sunucusu yapilandirilmamis. Kurulumu yapan firma ile iletisime gecin."
     };
   }
-
-  const grace = Math.max(1, Math.floor(input.registry?.offlineGraceDays ?? LICENSE_OFFLINE_GRACE_DAYS_DEFAULT));
 
   if (input.fetchFailed) {
     if (input.lastOkAt && daysSince(input.lastOkAt) <= grace) {
@@ -208,7 +218,8 @@ export async function runLicenseCheck(opts: {
         lastOkAt: opts.lastOkAt,
         fetchFailed: false,
         licenseBackendConfigured: true,
-        isDevBypass: true
+        isDevBypass: true,
+        hasActivationKey
       }),
       newLastOkAt: opts.lastOkAt,
       newDeviceId: deviceId,
@@ -254,7 +265,8 @@ export async function runLicenseCheck(opts: {
     lastOkAt: opts.lastOkAt,
     fetchFailed,
     licenseBackendConfigured,
-    isDevBypass: false
+    isDevBypass: false,
+    hasActivationKey
   });
 
   if (status.state === "pending" && hasActivationKey && opts.supabase) {

@@ -21,6 +21,18 @@ git push origin {version}
 - `Setup.exe`, `latest.yml`, `.blockmap` GitHub Release'e yuklenir
 - Aciklama metni `RELEASE_CHANGELOG_MD` dosyasindan alinir
 
+**GitHub Secrets (zorunlu — lisans icin):**
+
+Repo → **Settings → Secrets and variables → Actions** → New repository secret:
+
+| Secret | Aciklama |
+|--------|----------|
+| `MARINA_SUPABASE_URL` | Supabase proje URL |
+| `MARINA_SUPABASE_ANON_KEY` | Supabase anon (public) key |
+| `MARINA_LICENSE_APP_CODE` | Isteg bagli; varsayilan `marina-pos` |
+
+CI build oncesi `build/supabase-license.json` bu secret'lardan uretilir (git'e gitmez).
+
 **Bir kez kontrol:** Repo → **Settings → Actions → General → Workflow permissions → Read and write**
 
 Tag formati: `1.8.5` veya `v1.8.5` (mevcut etiketler `1.8.x` seklinde)

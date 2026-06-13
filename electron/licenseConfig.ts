@@ -10,9 +10,13 @@ let envLocalLoaded = false;
 function ensureEnvLocal() {
   if (envLocalLoaded) return;
   envLocalLoaded = true;
-  if (!app.isPackaged) {
-    loadEnvLocal([process.cwd(), app.getAppPath()]);
+  const dirs = [process.cwd(), app.getAppPath()];
+  try {
+    dirs.push(app.getPath("userData"));
+  } catch {
+    /* app henuz hazir degil */
   }
+  loadEnvLocal(dirs);
 }
 
 function licenseAppCodeFromEnv(fallback?: string): string {
@@ -41,7 +45,16 @@ function readTextFile(filePath: string): string {
 }
 
 function configCandidates(name: string): string[] {
-  return [path.join(app.getAppPath(), "build", name), path.join(process.cwd(), "build", name)];
+  const out: string[] = [];
+  try {
+    out.push(path.join(app.getPath("userData"), name));
+  } catch {
+    /* app henuz hazir degil */
+  }
+  out.push(path.join(app.getAppPath(), "build", name));
+  out.push(path.join(process.resourcesPath, "build", name));
+  out.push(path.join(process.cwd(), "build", name));
+  return out;
 }
 
 export function getLicenseRegistryUrl(): string {
