@@ -27,9 +27,11 @@ Repo → **Settings → Secrets and variables → Actions** → New repository s
 
 | Secret | Aciklama |
 |--------|----------|
-| `MARINA_SUPABASE_URL` | Supabase proje URL |
-| `MARINA_SUPABASE_ANON_KEY` | Supabase anon (public) key |
+| `MARINA_SUPABASE_URL` veya `NEXT_PUBLIC_SUPABASE_URL` | Supabase proje URL |
+| `MARINA_SUPABASE_ANON_KEY` veya `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon (public) key |
 | `MARINA_LICENSE_APP_CODE` | Isteg bagli; varsayilan `marina-pos` |
+
+`SUPABASE_SERVICE_ROLE_KEY` lisans icin gerekmez (yalnizca anon key kullanilir).
 
 CI build oncesi `build/supabase-license.json` bu secret'lardan uretilir (git'e gitmez).
 

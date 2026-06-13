@@ -39,6 +39,8 @@ jobs:
         env:
           MARINA_SUPABASE_URL: ${{ secrets.MARINA_SUPABASE_URL }}
           MARINA_SUPABASE_ANON_KEY: ${{ secrets.MARINA_SUPABASE_ANON_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           MARINA_LICENSE_APP_CODE: ${{ secrets.MARINA_LICENSE_APP_CODE }}
         run: node scripts/write-supabase-license-from-env.mjs
 
@@ -47,6 +49,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CI: true
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          MARINA_SUPABASE_URL: ${{ secrets.MARINA_SUPABASE_URL }}
+          MARINA_SUPABASE_ANON_KEY: ${{ secrets.MARINA_SUPABASE_ANON_KEY }}
         run: npm run build && npx electron-builder --win --publish always --config.npmRebuild=false
 
       - name: Verify release
