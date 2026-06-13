@@ -4,9 +4,30 @@ Kurulu uygulamalar **Ayarlar → Guncelleme** uzerinden GitHub Release (`erdinor
 
 GitHub Release metni: `src/features/account/accountReleaseNotes.ts` → `RELEASE_CHANGELOG_MD`
 
-## Otomatik yayin (onerilen)
+## Yayin oncesi kontrol (her seferinde)
 
-Surum numarasi ve notlar guncellendikten sonra:
+```powershell
+npm run release:verify
+```
+
+Bu komut kontrol eder: surum uyumu, Supabase lisans dosyasi, rapor modulleri, git remote.
+
+Musteri kurulumu icin:
+
+```powershell
+$env:MARINA_LICENSE_APP_CODE='marina-pos'
+npm run pack:release
+```
+
+Cikti: `release\Marina-Nargile-POS-{version}-Setup.exe` (+ blockmap + latest.yml)
+
+---
+
+## Otomatik yayin (CI — tag push)
+
+1. Surum artir (`package.json` + `accountReleaseNotes.ts`)
+2. `npm run release:verify`
+3. Commit + tag + push:
 
 ```powershell
 git add -A
@@ -16,56 +37,69 @@ git push origin master
 git push origin {version}
 ```
 
-**Tag push edilince** `.github/workflows/release.yml` calisir:
-- Windows kurulum dosyasi uretilir
-- `Setup.exe`, `latest.yml`, `.blockmap` GitHub Release'e yuklenir
-- Aciklama metni `RELEASE_CHANGELOG_MD` dosyasindan alinir
+Tag push → `.github/workflows/release.yml` calisir.
 
-**GitHub Secrets (zorunlu — lisans icin):**
+### GitHub Repository secrets (ZORUNLU)
 
-Repo → **Settings → Secrets and variables → Actions** → New repository secret:
+**Settings → Secrets and variables → Actions → Repository secrets**
+
+(Environment secrets veya github-pages **KULLANILMAZ**.)
 
 | Secret | Aciklama |
 |--------|----------|
-| `MARINA_SUPABASE_URL` veya `NEXT_PUBLIC_SUPABASE_URL` | Supabase proje URL |
-| `MARINA_SUPABASE_ANON_KEY` veya `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon (public) key |
-| `MARINA_LICENSE_APP_CODE` | Isteg bagli; varsayilan `marina-pos` |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase proje URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key |
 
-`SUPABASE_SERVICE_ROLE_KEY` lisans icin gerekmez (yalnizca anon key kullanilir).
+Istege bagli: `MARINA_LICENSE_APP_CODE` (varsayilan `marina-pos`)
 
-CI build oncesi `build/supabase-license.json` bu secret'lardan uretilir (git'e gitmez).
+**Settings → Actions → General → Workflow permissions → Read and write**
 
-**Bir kez kontrol:** Repo → **Settings → Actions → General → Workflow permissions → Read and write**
+### Manuel workflow calistirma
 
-Tag formati: `1.8.5` veya `v1.8.5` (mevcut etiketler `1.8.x` seklinde)
+Actions → sol menude **Release Windows** → Run workflow
 
-## Elle yayin (yedek)
+- Branch: **master**
+- Tag: **guncel surum** (ornek `1.8.8`) — **`v1.8.0` gibi eski tag secme**
 
-Actions calismazsa veya acil durumda:
+---
 
-```powershell
-npm run pack
-# release\Marina-Nargile-POS-{version}-Setup.exe
+## Elle GitHub Release (CI fail / acil)
 
-$env:GH_TOKEN = "<github_pat>"
-npm run publish:win
-```
+1. `npm run pack:release` (yukarida)
+2. https://github.com/erdinoral/marinapos/releases/new
+3. Tag: surum numarasi
+4. **3 dosya yukle:**
+   - `Marina-Nargile-POS-{version}-Setup.exe`
+   - `Marina-Nargile-POS-{version}-Setup.exe.blockmap`
+   - `latest.yml`
 
-## Surum artirma
+Otomatik guncelleme icin `latest.yml` sart.
 
-1. `package.json` → `version`
-2. `src/features/account/accountReleaseNotes.ts` → `APP_VERSION`, `APP_RELEASE_DATE`, `APP_RELEASE_NOTES`, `RELEASE_CHANGELOG_MD`
-3. Commit + tag + push (yukaridaki otomatik akis)
+---
+
+## Yasadigimiz sorunlar ve onlemler
+
+| Sorun | Neden | Onlem |
+|--------|--------|--------|
+| Lisans "Yapilandirma eksik" | CI build'de `supabase-license.json` yoktu | Repository secrets + `pack:release` yerelde |
+| CI Supabase adimi fail | Secret yanlis yerde (Environment) veya bos deger | Repository secrets; Edit ile degeri tekrar yapistir |
+| Yanlis repo | Secret baska hesapta | Push: `erdinoral/marinapos` |
+| v1.8.0 ile workflow | Eski tag secildi | Run workflow tag = guncel surum |
+| Release'de surum yok | CI fail, elle yuklenmedi | `release:verify` + 3 dosya ile elle release |
+
+---
+
+## Surum artirma checklist
+
+- [ ] `package.json` version
+- [ ] `accountReleaseNotes.ts` — APP_VERSION, tarih, notlar, RELEASE_CHANGELOG_MD
+- [ ] `npm run release:verify`
+- [ ] `$env:MARINA_LICENSE_APP_CODE='marina-pos'; npm run pack:release`
+- [ ] Tag push **veya** GitHub'a 3 dosya elle
+- [ ] Release sayfasinda Setup + latest.yml gorunuyor mu kontrol
 
 ## Musteriye guncelleme
 
-1. Uygulama icinden **Guncellemeleri kontrol et → Indir → Yeniden baslat ve kur**
-2. Veri klasoru (`userData/data`) degismez; yedek almak yine onerilir
-
-## Sorun giderme
-
-| Sorun | Cozum |
-|--------|--------|
-| Guncelleme bulunamadi | Release'de `latest.yml` ve `Setup.exe` var mi; tag surumu ile uyumlu mu |
-| Actions basarisiz | Actions sekmesinden log; `npm ci` / imzalama hatalarina bakin |
-| Elle publish hata | `GH_TOKEN` repo `contents` yetkisi |
+1. Uygulama icinden **Guncellemeleri kontrol et → Indir → Yeniden baslat**
+2. Kilit ekranindaysa Setup.exe'yi elle kur
+3. Veri klasoru (`userData/data`) korunur; yedek onerilir
