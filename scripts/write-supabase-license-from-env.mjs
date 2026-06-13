@@ -36,9 +36,12 @@ const anonKey = String(
 const appCode = String(process.env.MARINA_LICENSE_APP_CODE ?? "marina-pos").trim() || "marina-pos";
 
 if (!url || !anonKey) {
-  console.error(
-    "HATA: CI icin MARINA_SUPABASE_URL ve MARINA_SUPABASE_ANON_KEY GitHub Secrets olarak tanimli olmali."
-  );
+  console.error("HATA: Supabase URL veya anon key bos.");
+  console.error(`  URL: ${url ? "var" : "YOK"}`);
+  console.error(`  ANON: ${anonKey ? "var" : "YOK"}`);
+  console.error("GitHub → Settings → Secrets and variables → Actions → Repository secrets");
+  console.error("  NEXT_PUBLIC_SUPABASE_URL");
+  console.error("  NEXT_PUBLIC_SUPABASE_ANON_KEY");
   process.exit(1);
 }
 

@@ -36,13 +36,17 @@ jobs:
         run: node scripts/extract-release-notes.mjs
 
       - name: Supabase license config (CI)
+        shell: bash
         env:
           MARINA_SUPABASE_URL: ${{ secrets.MARINA_SUPABASE_URL }}
           MARINA_SUPABASE_ANON_KEY: ${{ secrets.MARINA_SUPABASE_ANON_KEY }}
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
           MARINA_LICENSE_APP_CODE: ${{ secrets.MARINA_LICENSE_APP_CODE }}
-        run: node scripts/write-supabase-license-from-env.mjs
+        run: |
+          echo "URL set: $([ -n \"$NEXT_PUBLIC_SUPABASE_URL$MARINA_SUPABASE_URL\" ] && echo yes || echo NO)"
+          echo "ANON set: $([ -n \"$NEXT_PUBLIC_SUPABASE_ANON_KEY$MARINA_SUPABASE_ANON_KEY\" ] && echo yes || echo NO)"
+          node scripts/write-supabase-license-from-env.mjs
 
       - name: Build and publish
         env:
