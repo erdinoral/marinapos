@@ -43,16 +43,22 @@ jobs:
         run: node scripts/extract-release-notes.mjs
 
       - name: Supabase license config (CI)
-        shell: bash
+        shell: pwsh
         env:
-          MARINA_SUPABASE_URL: ${{ secrets.MARINA_SUPABASE_URL }}
-          MARINA_SUPABASE_ANON_KEY: ${{ secrets.MARINA_SUPABASE_ANON_KEY }}
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
-          MARINA_LICENSE_APP_CODE: ${{ secrets.MARINA_LICENSE_APP_CODE }}
+          MARINA_SUPABASE_URL: ${{ secrets.MARINA_SUPABASE_URL || vars.MARINA_SUPABASE_URL }}
+          MARINA_SUPABASE_ANON_KEY: ${{ secrets.MARINA_SUPABASE_ANON_KEY || vars.MARINA_SUPABASE_ANON_KEY }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || vars.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || vars.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          MARINA_LICENSE_APP_CODE: ${{ secrets.MARINA_LICENSE_APP_CODE || vars.MARINA_LICENSE_APP_CODE }}
         run: |
-          echo "URL set: $([ -n \"$NEXT_PUBLIC_SUPABASE_URL$MARINA_SUPABASE_URL\" ] && echo yes || echo NO)"
-          echo "ANON set: $([ -n \"$NEXT_PUBLIC_SUPABASE_ANON_KEY$MARINA_SUPABASE_ANON_KEY\" ] && echo yes || echo NO)"
+          $hasUrl = [bool]($env:NEXT_PUBLIC_SUPABASE_URL -or $env:MARINA_SUPABASE_URL)
+          $hasAnon = [bool]($env:NEXT_PUBLIC_SUPABASE_ANON_KEY -or $env:MARINA_SUPABASE_ANON_KEY)
+          Write-Host "URL set: $(if ($hasUrl) { 'yes' } else { 'NO' })"
+          Write-Host "ANON set: $(if ($hasAnon) { 'yes' } else { 'NO' })"
+          if (-not $hasUrl -or -not $hasAnon) {
+            Write-Error "Repository secrets/variables bos. Settings → Secrets and variables → Actions → Repository secrets VEYA Variables tab."
+            exit 1
+          }
           node scripts/write-supabase-license-from-env.mjs
 
       - name: Build and publish
