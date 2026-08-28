@@ -674,11 +674,19 @@ ${squarePrintLayout}
 
       const triggerPrint = () => {
         try {
-          win.addEventListener("afterprint", cleanup, { once: true });
-          window.setTimeout(cleanup, 180000);
+          let settled = false;
+          const finish = () => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            resolve();
+          };
+          win.addEventListener("afterprint", finish, { once: true });
+          // Diyalog acildi — dugme takilmasin (afterprint bazi yazicilarda gelmez)
+          window.setTimeout(finish, 2000);
+          window.setTimeout(finish, 180000);
           win.focus();
           win.print();
-          window.setTimeout(() => resolve(), 500);
         } catch (e) {
           cleanup();
           reject(e instanceof Error ? e : new Error("Yazdirma basarisiz."));
@@ -720,35 +728,34 @@ ${squarePrintLayout}
         const w = labelSize.widthMm;
         const h = labelSize.heightMm;
 
-        const api = getMarinaApi();
-        let electronError = "";
-        // Electron: tam mm boyutu gonder — iframe window.print() yazici surucusunde bos etiket yapabiliyor
-        if (typeof api.printHtml === "function") {
-          const result = await api.printHtml(html, { widthMm: w, heightMm: h, title: "Barkod Etiket" });
-          if (result?.ok === true) {
-            setMsg("");
-            return;
-          }
-          if (result && result.ok === false && /iptal|cancel/i.test(result.error || "")) {
-            setMsg("Yazdirma iptal edildi.");
-            return;
-          }
-          electronError = result && result.ok === false ? result.error : "";
-          console.warn("Electron yazdirma basarisiz, iframe deneniyor:", result);
-        }
-
+        // Once iframe — hizli; Electron printHtml yazici diyalogunda asilabiliyor
         try {
           await printViaIframe(html, w, h);
           setMsg("");
           return;
         } catch (iframeErr) {
-          console.warn("iframe yazdirma basarisiz:", iframeErr);
+          console.warn("iframe yazdirma basarisiz, Electron deneniyor:", iframeErr);
         }
 
-        throw new Error(
-          electronError ||
-            "Yazdirma basarisiz. Yazicida kâgit boyutu secilen etiketle ayni olmali (orn. 60x40 mm), olcek %100."
-        );
+        const api = getMarinaApi();
+        if (typeof api.printHtml !== "function") {
+          throw new Error("Yazdirma desteklenmiyor.");
+        }
+        const result = await Promise.race([
+          api.printHtml(html, { widthMm: w, heightMm: h, title: "Barkod Etiket" }),
+          new Promise<{ ok: false; error: string }>((resolve) =>
+            window.setTimeout(() => resolve({ ok: false, error: "Yazdirma zaman asimi." }), 185000)
+          )
+        ]);
+        if (result?.ok === true) {
+          setMsg("");
+          return;
+        }
+        if (result && result.ok === false && /iptal|cancel/i.test(result.error || "")) {
+          setMsg("Yazdirma iptal edildi.");
+          return;
+        }
+        throw new Error(result && result.ok === false ? result.error : "Yazdirma basarisiz.");
       } catch (e) {
         console.error("Barkod yazdirma hatasi", e);
         const text = e instanceof Error ? e.message : "Yazdirma basarisiz.";
