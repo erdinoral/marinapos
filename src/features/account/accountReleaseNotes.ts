@@ -1,8 +1,13 @@
-export const APP_VERSION = "1.9.24";
+export const APP_VERSION = "1.9.25";
 export const APP_RELEASE_DATE = "28 Agustos 2026";
 
 /** Hesap → Surumler ekraninda kartlar */
 export const APP_RELEASE_NOTES: { title: string; body: string }[] = [
+  {
+    title: "Barkod 60x40 + 100x100 yazici (1.9.25)",
+    body:
+      "60x40 baski onizleme ile hizalandi (sik duzen, tam mm sayfa boyutu). 100x100 icin ayri baski duzeni ve barkod olcegi; surucude 100x100 mm tanimli olmali. Yazdir penceresi olcek %100 uyarisi eklendi."
+  },
   {
     title: "Barkod baski = onizleme (1.9.24)",
     body:
@@ -201,9 +206,10 @@ export const APP_RELEASE_NOTES: { title: string; body: string }[] = [
 ];
 
 /** GitHub Release / electron-updater changelog */
-export const RELEASE_CHANGELOG_MD = `## Marina Nargile POS 1.9.24
+export const RELEASE_CHANGELOG_MD = `## Marina Nargile POS 1.9.25
 
 ### Duzeltme
-- 100x100 barkod etiketi bos/beyaz basilma duzeltildi
-- Baski ciktisi onizleme ile ayni (barkod SVG ve duzen hizalandi)
+- 60x40 barkod baskisi onizleme ile ayni (sik duzen, Electron tam mm sayfa boyutu)
+- 100x100 baski duzeni ve barkod olcegi duzeltildi; yazicida 100x100 mm tanimli olmali
+- Yazdir penceresinde olcek %100 uyarisi
 `;

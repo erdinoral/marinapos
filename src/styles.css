@@ -7914,6 +7914,18 @@ body { background: #121212; color: #f3f3f3; }
   color: #b8a888;
   letter-spacing: 0.03em;
 }
+.barcode-label-print-hint {
+  margin: 0;
+  align-self: stretch;
+  font-size: 11px;
+  line-height: 1.35;
+  color: #c9a45a;
+  text-align: center;
+}
+.barcode-label-print-hint strong {
+  color: #e8c97a;
+  font-weight: 700;
+}
 .barcode-label-size {
   margin: 0 0 10px;
   padding: 12px;

@@ -533,26 +533,35 @@ ipcMain.handle(
         printWin.moveTop();
       }
 
-      // window.print — diyalog kapanana (afterprint) kadar bekle; erken destroy diyaloğu öldürür
-      const outcome = await Promise.race([
-        printWin.webContents.executeJavaScript(
-          `new Promise((resolve) => {
-            let done = false;
-            const finish = (v) => { if (done) return; done = true; resolve(v); };
-            window.addEventListener("afterprint", () => finish("ok"), { once: true });
-            try { window.focus(); window.print(); } catch (e) { finish("err:" + String(e)); }
-          })`,
-          true
-        ) as Promise<string>,
-        new Promise<string>((resolve) => setTimeout(() => resolve("timeout"), 180000))
-      ]);
+      // Tam etiket boyutu (mikron) — yazici surucusu @page'i yok sayarsa bos etiket beslemesini onler
+      const pageW = Math.round(widthMm * 1000);
+      const pageH = Math.round(heightMm * 1000);
+      const printOutcome = await new Promise<{ ok: true } | { ok: false; error: string }>((resolve) => {
+        if (printWin.isDestroyed()) {
+          resolve({ ok: false, error: "Yazdirma penceresi kapandi." });
+          return;
+        }
+        printWin.webContents.print(
+          {
+            silent: false,
+            printBackground: true,
+            landscape: false,
+            margins: { marginType: "none" },
+            pageSize: { width: pageW, height: pageH },
+            scaleFactor: 100
+          },
+          (success, failureReason) => {
+            if (success) resolve({ ok: true });
+            else {
+              const reason = String(failureReason ?? "").trim();
+              if (/cancel|iptal/i.test(reason)) resolve({ ok: false, error: "Yazdirma iptal edildi." });
+              else resolve({ ok: false, error: reason || "Yazdirma basarisiz." });
+            }
+          }
+        );
+      });
 
-      if (typeof outcome === "string" && outcome.startsWith("err:")) {
-        return { ok: false, error: outcome.slice(4) || "Yazdirma hatasi." };
-      }
-      if (outcome === "timeout") {
-        return { ok: false, error: "Yazici penceresi zaman asimina ugradi." };
-      }
+      if (!printOutcome.ok) return printOutcome;
       return { ok: true };
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) };

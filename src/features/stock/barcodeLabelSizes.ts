@@ -206,11 +206,11 @@ export const BARCODE_LABEL_SIZES: BarcodeLabelSize[] = [
     },
     domLogoHeight: "10mm",
     barcode: {
-      heightDense: 56,
-      heightMid: 64,
-      heightOpen: 72,
-      heightAir: 80,
-      barWidth: 2.45
+      heightDense: 52,
+      heightMid: 58,
+      heightOpen: 62,
+      heightAir: 66,
+      barWidth: 2.1
     }
   }
 ];

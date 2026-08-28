@@ -129,6 +129,17 @@ function domesticBadgeHtml(logoDataUrl: string, logoHeight: string): string {
 </div>`;
 }
 
+/** JsBarcode px boyutlari buyuk (100x100) etikette baski motorunu bozabiliyor */
+function barcodeSvgForPrint(barcodeValue: string, labelHeight: number, barWidth: number): string {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "bc");
+  renderBarcode(svg, barcodeValue, "label", labelHeight, barWidth);
+  svg.removeAttribute("width");
+  svg.removeAttribute("height");
+  svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+  return svg.outerHTML;
+}
+
 function formatPriceDate(iso: string) {
   if (!iso?.trim()) return "—";
   const d = new Date(iso);
@@ -334,20 +345,37 @@ export function BarcodePrintModal({ product, categorySaleUnit = "piece", setting
     if (f.origin) leftBits.push(`<div class="detail">${escapeHtml(originLabel(labelView.isDomestic))}</div>`);
     if (f.fdt && priceDate !== "—") leftBits.push(`<div class="detail">${escapeHtml(`FDT : ${priceDate}`)}</div>`);
 
-    // Onizlemedeki SVG ile ayni ciksin — yoksa uret (JsBarcode yazdirma penceresinde yok)
+    // Baski icin her seferinde uret — onizleme SVG'sinin px boyutu 100x100'de surucuyu bozabiliyor
     let barcodeMarkup = "";
     if (f.barcode) {
-      const liveSvg = svgRef.current;
-      const liveHasBars = liveSvg?.querySelector("rect, path, line, g");
-      if (liveSvg && liveHasBars) {
-        barcodeMarkup = liveSvg.outerHTML;
-      } else {
-        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-        svg.setAttribute("class", "bc");
-        renderBarcode(svg, barcodeValue, "label", barcodeH, labelSize.barcode.barWidth);
-        barcodeMarkup = svg.outerHTML;
-      }
+      barcodeMarkup = barcodeSvgForPrint(barcodeValue, barcodeH, labelSize.barcode.barWidth);
     }
+
+    const squarePrintLayout = isSquareLabel
+      ? `
+  .label.is-square {
+    display: grid;
+    grid-template-rows: auto auto 1fr;
+    align-content: start;
+    gap: ${labelSize.gap};
+  }
+  .label.is-square .top { grid-row: 1; }
+  .label.is-square .foot {
+    grid-row: 2 / 4;
+    display: grid;
+    grid-template-rows: auto 1fr;
+    gap: ${labelSize.gap};
+    min-height: 0;
+  }
+  .label.is-square .bc-wrap {
+    align-self: end;
+    max-height: none;
+    padding-top: 1mm;
+  }
+  .label.is-square .bc-wrap svg {
+    max-height: 30mm;
+  }`
+      : "";
 
     return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Barkod Etiket</title>
 <style>
@@ -392,7 +420,7 @@ export function BarcodePrintModal({ product, categorySaleUnit = "piece", setting
     display: flex;
     flex-direction: column;
     gap: ${labelSize.gap};
-    flex: 0 1 auto;
+    flex: 0 0 auto;
     min-height: 0;
     overflow: hidden;
   }
@@ -401,10 +429,10 @@ export function BarcodePrintModal({ product, categorySaleUnit = "piece", setting
     text-align: center;
     font-size: ${nameFs};
     font-weight: 800;
-    line-height: 1.1;
+    line-height: 1.08;
     text-transform: uppercase;
     letter-spacing: 0.02em;
-    max-height: 2.4em;
+    max-height: ${isSquareLabel ? "2.4em" : "3.2em"};
     overflow: hidden;
     word-break: break-word;
     color: #111;
@@ -430,7 +458,7 @@ export function BarcodePrintModal({ product, categorySaleUnit = "piece", setting
     color: #111;
   }
   .foot {
-    margin-top: auto;
+    margin-top: 0;
     display: flex;
     flex-direction: column;
     gap: ${labelSize.gap};
@@ -469,7 +497,7 @@ export function BarcodePrintModal({ product, categorySaleUnit = "piece", setting
     flex: 0 1 ${isSquareLabel ? "62%" : "50%"};
     max-width: ${isSquareLabel ? "64%" : "52%"};
     min-width: 0;
-    overflow: ${isSquareLabel ? "visible" : "hidden"};
+    overflow: visible;
     padding-right: ${isSquareLabel ? "0.4mm" : "0"};
     box-sizing: border-box;
   }
@@ -555,13 +583,14 @@ export function BarcodePrintModal({ product, categorySaleUnit = "piece", setting
     max-width: 100%;
     width: 100%;
     height: auto;
-    max-height: ${isSquareLabel ? "26mm" : "none"};
+    max-height: ${isSquareLabel ? "30mm" : "none"};
     display: block;
     margin: 0 auto;
   }
   .hidden { display: none !important; }
+${squarePrintLayout}
 </style></head><body>
-<div class="label">
+<div class="label${isSquareLabel ? " is-square" : ""}">
   <div class="top">
     ${f.companyName ? `<div class="company">${escapeHtml(companyName)}</div>` : ""}
     <div class="name ${f.productName ? "" : "hidden"}${f.productName && f.productNameBlack ? " is-black" : ""}">${escapeHtml(name)}</div>
@@ -691,30 +720,35 @@ export function BarcodePrintModal({ product, categorySaleUnit = "piece", setting
         const w = labelSize.widthMm;
         const h = labelSize.heightMm;
 
-        // Once iframe — Electron printHtml bazi PC'lerde asili kalip dugmeyi kilitliyordu
+        const api = getMarinaApi();
+        let electronError = "";
+        // Electron: tam mm boyutu gonder — iframe window.print() yazici surucusunde bos etiket yapabiliyor
+        if (typeof api.printHtml === "function") {
+          const result = await api.printHtml(html, { widthMm: w, heightMm: h, title: "Barkod Etiket" });
+          if (result?.ok === true) {
+            setMsg("");
+            return;
+          }
+          if (result && result.ok === false && /iptal|cancel/i.test(result.error || "")) {
+            setMsg("Yazdirma iptal edildi.");
+            return;
+          }
+          electronError = result && result.ok === false ? result.error : "";
+          console.warn("Electron yazdirma basarisiz, iframe deneniyor:", result);
+        }
+
         try {
           await printViaIframe(html, w, h);
           setMsg("");
           return;
         } catch (iframeErr) {
-          console.warn("iframe yazdirma basarisiz, Electron deneniyor:", iframeErr);
+          console.warn("iframe yazdirma basarisiz:", iframeErr);
         }
 
-        const api = getMarinaApi();
-        if (typeof api.printHtml !== "function") {
-          throw new Error("Yazdirma desteklenmiyor.");
-        }
-        // Electron yedek: diyalog kapanana kadar bekler (erken timeout yok)
-        const result = await api.printHtml(html, { widthMm: w, heightMm: h, title: "Barkod Etiket" });
-        if (result?.ok === true) {
-          setMsg("");
-          return;
-        }
-        if (result && result.ok === false && /iptal|cancel/i.test(result.error || "")) {
-          setMsg("Yazdirma iptal edildi.");
-          return;
-        }
-        throw new Error(result && result.ok === false ? result.error : "Yazdirma basarisiz.");
+        throw new Error(
+          electronError ||
+            "Yazdirma basarisiz. Yazicida kâgit boyutu secilen etiketle ayni olmali (orn. 60x40 mm), olcek %100."
+        );
       } catch (e) {
         console.error("Barkod yazdirma hatasi", e);
         const text = e instanceof Error ? e.message : "Yazdirma basarisiz.";
@@ -923,6 +957,20 @@ export function BarcodePrintModal({ product, categorySaleUnit = "piece", setting
           <div className="barcode-label-preview-wrap screen-only" aria-label="Etiket onizleme">
             <p className="barcode-label-preview-caption">
               Onizleme · {formatLabelSizeMm(labelSize)}
+            </p>
+            <p className="barcode-label-print-hint">
+              {labelSize.id === "100x100" ? (
+                <>
+                  <strong>100×100 mm</strong> fiziksel etiket rulonuz takili olmali. Xprinter surucusunde kâgit boyutu da{" "}
+                  <strong>100×100 mm</strong> olarak tanimli olmali — 60×40 ayariyla 100×100 baski bos cikar. Olcek{" "}
+                  <strong>%100</strong>.
+                </>
+              ) : (
+                <>
+                  Yazicida kâgit/etiket boyutu buradaki secimle ayni olmali ({formatLabelSizeMm(labelSize)}). Yazdir
+                  penceresinde olcek <strong>%100</strong> — Doldur veya Sigdir kullanmayin.
+                </>
+              )}
             </p>
             <div
               className={`barcode-label-preview${layoutScale === "dense" ? " is-dense" : ""}${layoutScale === "air" ? " is-air" : ""} size-${labelSize.id}`}
