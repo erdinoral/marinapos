@@ -1,8 +1,18 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { CategorySaleUnit, Product, StockCostMode } from "../../types/models";
-import { formatTry, parseTrAmount, tlToKurus } from "../../utils/currency";
+import { formatTry, formatTlTable, parseTrAmount, tlToKurus } from "../../utils/currency";
 import { computeStockAddCosts, lineCostKurusFromUnit } from "../../utils/stockCost";
 import { incomingCostTlToUnitCostKurus } from "../../utils/saleUnit";
+import { resolveLinePaymentFromPaidTl } from "./linePaidTl";
+import {
+  centsToUsd,
+  costUsdArrivalPreview,
+  getCachedUsdTry,
+  parseUsdAmount,
+  parseUsdTryRate,
+  usdCentsToTlKurus,
+  usdToCents
+} from "../../utils/usdPricing";
 
 type Props = {
   saleUnit: CategorySaleUnit;
@@ -13,14 +23,14 @@ type Props = {
   onIncomingCostTlChange: (v: string) => void;
   invoicePaidTl: string;
   onInvoicePaidTlChange: (v: string) => void;
-  remainingDebtTl: string;
-  onRemainingDebtTlChange: (v: string) => void;
+  linePaidTl: string;
+  onLinePaidTlChange: (v: string) => void;
   disabled?: boolean;
   product?: Product | null;
   /** Toplu fatura modalinda onizleme blogu yer kaplar; false ile gizlenir */
   showCostPreview?: boolean;
-  /** Toplu faturada kalem borcu fatura altindaki odenen tutardan hesaplanir */
-  hideRemainingDebt?: boolean;
+  /** Toplu faturada kalem odeneni fatura altindaki odenen tutardan hesaplanir */
+  hideLinePaid?: boolean;
 };
 
 export function StockCostFields({
@@ -32,13 +42,40 @@ export function StockCostFields({
   onIncomingCostTlChange,
   invoicePaidTl,
   onInvoicePaidTlChange,
-  remainingDebtTl,
-  onRemainingDebtTlChange,
+  linePaidTl,
+  onLinePaidTlChange,
   disabled,
   product,
   showCostPreview = true,
-  hideRemainingDebt = false
+  hideLinePaid = false
 }: Props) {
+  const incomingCostTitle =
+    saleUnit === "gram" ? "Birim gelis (TL / 1000 g) *" : "Birim gelis (TL / adet) *";
+  const incomingCostRefTitle =
+    saleUnit === "gram" ? "Referans birim gelis (TL / 1000 g)" : "Referans birim gelis (TL / adet)";
+  const usdCost = product?.pricedInUsd === true;
+  const [costUsd, setCostUsd] = useState("");
+  const [costUsdTryRate, setCostUsdTryRate] = useState("");
+
+  useEffect(() => {
+    if (!usdCost || !product) return;
+    setCostUsd((product.costUsdCents ?? 0) > 0 ? centsToUsd(product.costUsdCents).toFixed(2) : "");
+    const locked = Number(product.costUsdTryRate);
+    const live = getCachedUsdTry();
+    setCostUsdTryRate(locked > 0 ? String(locked) : live != null ? live.toFixed(4) : "");
+  }, [usdCost, product?.id, product?.costUsdCents, product?.costUsdTryRate]);
+
+  useEffect(() => {
+    if (!usdCost) return;
+    const usd = parseUsdAmount(costUsd);
+    const rate = parseUsdTryRate(costUsdTryRate);
+    if (usd == null || rate == null) return;
+    const next = (usdCentsToTlKurus(usdToCents(usd), rate) / 100).toFixed(2);
+    if (next !== incomingCostTl) onIncomingCostTlChange(next);
+    // incomingCostTl bilerek bagimlilikta yok — donguyu engeller
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [usdCost, costUsd, costUsdTryRate]);
+
   const preview = useMemo(() => {
     const q = Math.max(0, Math.round(qty));
     if (q <= 0) return null;
@@ -67,18 +104,23 @@ export function StockCostFields({
         unitCatalogKurus,
         invoicePaidKurus
       });
-      const debtParsed = parseTrAmount(remainingDebtTl);
-      const remainingDebtKurus =
-        debtParsed != null && debtParsed > 0 ? tlToKurus(debtParsed) : 0;
-      if (remainingDebtKurus > costs.lineCostKurus) {
-        return { error: "Kalan borc, alis tutarindan fazla olamaz." };
+      const payment = resolveLinePaymentFromPaidTl(linePaidTl, costs.lineCostKurus, { alert: () => {} });
+      if (!payment) {
+        const paidParsed = parseTrAmount(linePaidTl);
+        if (linePaidTl.trim() && (paidParsed == null || paidParsed < 0)) {
+          return { error: "Odenen tutar (TL) gecersiz." };
+        }
+        if (paidParsed != null && paidParsed > 0 && tlToKurus(paidParsed) > costs.lineCostKurus) {
+          return { error: "Odenen tutar, alis tutarindan fazla olamaz." };
+        }
       }
-      const amountPaidKurus = costs.lineCostKurus - remainingDebtKurus;
+      const amountPaidKurus = payment?.amountPaidKurus ?? costs.lineCostKurus;
+      const remainingDebtKurus = payment?.remainingDebtKurus ?? 0;
       return { costs, remainingDebtKurus, amountPaidKurus };
     } catch (e) {
       return { error: e instanceof Error ? e.message : "Hesaplanamadi." };
     }
-  }, [saleUnit, qty, costMode, incomingCostTl, invoicePaidTl, remainingDebtTl, product?.costPriceKurus]);
+  }, [saleUnit, qty, costMode, incomingCostTl, invoicePaidTl, linePaidTl, product?.costPriceKurus]);
 
   return (
     <div className="stock-cost-block">
@@ -101,9 +143,58 @@ export function StockCostFields({
         </button>
       </div>
 
-      {costMode === "product" ? (
+      {costMode === "product" && usdCost ? (
+        <>
+          <label className="stock-incoming-cost-label">
+            <span className="stock-incoming-cost-title">Gelis kuru (USD/TRY) — hangi kurdan geldi *</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={costUsdTryRate}
+              onChange={(e) => setCostUsdTryRate(e.target.value)}
+              disabled={disabled}
+              autoComplete="off"
+              placeholder="orn. 38.50"
+            />
+            <span className="stock-help small">
+              Urun kartindaki gelis kuru varsayilan gelir; bu girise ozel degistirebilirsiniz.
+              <button
+                type="button"
+                className="linkish"
+                disabled={disabled || getCachedUsdTry() == null}
+                onClick={() => {
+                  const r = getCachedUsdTry();
+                  if (r != null) setCostUsdTryRate(r.toFixed(4));
+                }}
+              >
+                Guncel kuru yaz
+              </button>
+            </span>
+          </label>
+          <label className="stock-incoming-cost-label">
+            <span className="stock-incoming-cost-title">
+              {saleUnit === "gram" ? "Birim gelis (USD / 1000 g) *" : "Birim gelis (USD / adet) *"}
+            </span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={costUsd}
+              onChange={(e) => setCostUsd(e.target.value)}
+              disabled={disabled}
+              autoComplete="off"
+            />
+            <span className="stock-help small">
+              {costUsdArrivalPreview(parseUsdAmount(costUsd) ?? 0, parseUsdTryRate(costUsdTryRate))}
+              {" · "}
+              TL birim: <strong>{incomingCostTl || "—"}</strong>
+            </span>
+          </label>
+        </>
+      ) : null}
+
+      {costMode === "product" && !usdCost ? (
         <label className="stock-incoming-cost-label">
-          <span className="stock-incoming-cost-title">Birim gelis (TL) *</span>
+          <span className="stock-incoming-cost-title">{incomingCostTitle}</span>
           <input
             type="text"
             inputMode="decimal"
@@ -113,12 +204,14 @@ export function StockCostFields({
             autoComplete="off"
           />
           <span className="stock-help small">
-            {hideRemainingDebt
+            {hideLinePaid
               ? "Satir tutari = birim × miktar. Eksik odeme varsa fatura altindaki odenen tutardan hesaplanir."
-              : "Satir tutari = birim × miktar. Eksik odeme varsa asagida kalan borc girin."}
+              : "Satir tutari = birim × miktar. Eksik odeme varsa asagida odenen tutari girin."}
           </span>
         </label>
-      ) : (
+      ) : null}
+
+      {costMode === "invoice" ? (
         <label className="stock-incoming-cost-label">
           <span className="stock-incoming-cost-title">Odenen fatura tutari (TL) *</span>
           <input
@@ -135,11 +228,11 @@ export function StockCostFields({
             hesaplanir.
           </span>
         </label>
-      )}
+      ) : null}
 
       {costMode === "invoice" ? (
         <label className="stock-incoming-cost-label">
-          <span className="stock-incoming-cost-title">Referans birim gelis (TL)</span>
+          <span className="stock-incoming-cost-title">{incomingCostRefTitle}</span>
           <input
             type="text"
             inputMode="decimal"
@@ -152,20 +245,21 @@ export function StockCostFields({
         </label>
       ) : null}
 
-      {hideRemainingDebt ? null : (
+      {hideLinePaid ? null : (
         <label className="stock-incoming-cost-label">
-          <span className="stock-incoming-cost-title">Kalan borc (TL)</span>
+          <span className="stock-incoming-cost-title">Odenen tutar (TL)</span>
           <input
             type="text"
             inputMode="decimal"
-            value={remainingDebtTl}
-            onChange={(e) => onRemainingDebtTlChange(e.target.value)}
+            value={linePaidTl}
+            onChange={(e) => onLinePaidTlChange(e.target.value)}
             disabled={disabled}
             autoComplete="off"
             placeholder="Bos = tam odendi"
           />
           <span className="stock-help small">
-            Alis tutarinin odenmeyen kismi; secili tedarikcinin borcuna eklenir. Gidere yalnizca odenen tutar yazilir.
+            Bu kaleme odediginiz tutar. Fark (alis − odenen) secili tedarikcinin borcuna yazilir; gidere yalnizca
+            odenen tutar duser.
           </span>
         </label>
       )}
@@ -210,7 +304,7 @@ export function StockCostFields({
             <span>Kayit birim maliyet</span>
             <strong>
               {saleUnit === "gram"
-                ? `${(preview.costs.unitCostRecorded / 100).toFixed(2)} TL / 1000 g`
+                ? `${formatTlTable(preview.costs.unitCostRecorded / 100).replace(" ₺", "")} / 1000 g`
                 : `${formatTry(preview.costs.unitCostRecorded)} / adet`}
             </strong>
           </div>

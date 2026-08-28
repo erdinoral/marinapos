@@ -16,24 +16,28 @@ export function StockInventorySummary({
   if (totals.skuCount <= 0 && totals.costKurus <= 0 && totals.revenueKurus <= 0) {
     return null;
   }
+  const valueKey = `${totals.skuCount}-${totals.costKurus}-${totals.revenueKurus}-${totals.profitKurus}`;
   return (
-    <div className="stock-list-footer" aria-label={ariaLabel}>
+    <div className="stock-list-footer" aria-label={ariaLabel} data-inventory-key={valueKey}>
       <div className="stock-list-footer-line">
         <span>{countLabel}</span>
         <strong>{totals.skuCount}</strong>
       </div>
       <div className="stock-list-footer-line">
-        <span>Toplam stok maliyeti (gelis)</span>
-        <strong>{formatTry(totals.costKurus)}</strong>
+        <span>Toplam stok maliyeti (gelis) — stok adedine gore</span>
+        <strong key={`c-${totals.costKurus}`}>{formatTry(totals.costKurus)}</strong>
       </div>
       <div className="stock-list-footer-line">
-        <span>Hepsi satilirsa tahmini ciro (liste, urun indirimi dahil)</span>
-        <strong>{formatTry(totals.revenueKurus)}</strong>
+        <span>Hepsi satilirsa tahmini ciro — stok adedi × liste fiyati</span>
+        <strong key={`r-${totals.revenueKurus}`}>{formatTry(totals.revenueKurus)}</strong>
       </div>
       <div className="stock-list-footer-line stock-list-footer-profit">
         <span>Tahmini brut kar (ciro - maliyet)</span>
-        <strong>{formatTry(totals.profitKurus)}</strong>
+        <strong key={`p-${totals.profitKurus}`}>{formatTry(totals.profitKurus)}</strong>
       </div>
+      <p className="stock-help small stock-list-footer-note">
+        Birim satis fiyati degismez; stok azalinca yukaridaki <em>toplam tutarlar</em> duser.
+      </p>
     </div>
   );
 }

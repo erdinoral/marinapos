@@ -1,0 +1,100 @@
+.static-page {
+  max-width: 42rem;
+}
+
+.prose {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  color: var(--text-muted);
+}
+
+.prose strong {
+  color: var(--text);
+}
+
+.contact-grid {
+  display: grid;
+  gap: 2rem;
+}
+
+@media (min-width: 720px) {
+  .contact-grid {
+    grid-template-columns: 1fr 1.2fr;
+  }
+}
+
+.contact-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  color: var(--text-muted);
+}
+
+.contact-info strong {
+  color: var(--gold);
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.contact-form {
+  max-width: none;
+}
+
+.guide-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.guide-list-item {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.25rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  transition: border-color 0.2s;
+}
+
+.guide-list-item:hover {
+  border-color: var(--gold);
+}
+
+.guide-list-item h2 {
+  font-size: 1.35rem;
+  margin-bottom: 0.35rem;
+}
+
+.guide-list-item p {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.guide-list-item > span {
+  font-size: 0.8rem;
+  color: var(--gold);
+  white-space: nowrap;
+}
+
+.guide-meta {
+  font-size: 0.85rem;
+  color: var(--gold);
+  margin-bottom: 0.5rem;
+}
+
+.breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-bottom: 1rem;
+}
+
+.breadcrumb a:hover {
+  color: var(--gold);
+}

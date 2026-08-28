@@ -1,5 +1,6 @@
 import type { CategorySaleUnit, StockCostMode, StockEntryLogRow } from "../types/models";
-import { gramLineTotalKurus, normalizeGramCartQty } from "./saleUnit";
+import { gramLineTotalKurus, normalizeGramCartQty, tlPer1000gToKurusPerGram } from "./saleUnit";
+import { kurusToTl, tlToKurus } from "./currency";
 
 export function lineCostKurusFromUnit(unitCostKurus: number, qty: number, saleUnit: CategorySaleUnit): number {
   const unit = Math.max(0, Math.round(unitCostKurus));
@@ -17,13 +18,15 @@ export function lineCostKurusFromUnit(unitCostKurus: number, qty: number, saleUn
 export function unitCostKurusFromInvoicePaid(invoicePaidKurus: number, qty: number, saleUnit: CategorySaleUnit): number {
   const paid = Math.max(0, Math.round(invoicePaidKurus));
   if (paid <= 0) return 0;
+  const paidTl = kurusToTl(paid);
   if (saleUnit === "gram") {
-    const g = normalizeGramCartQty(qty);
-    if (g <= 0) return 0;
-    return Math.round((paid * 1000) / g);
+    const g = Math.max(1, Math.round(qty));
+    const tlPer1000 = Math.round((paidTl * 1000 / g) * 100) / 100;
+    return tlPer1000gToKurusPerGram(tlPer1000);
   }
   const q = Math.max(1, Math.round(qty));
-  return Math.round(paid / q);
+  const unitTl = Math.round((paidTl / q) * 100) / 100;
+  return tlToKurus(unitTl);
 }
 
 export function computeStockAddCosts(input: {

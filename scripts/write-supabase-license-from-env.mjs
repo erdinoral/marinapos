@@ -26,22 +26,22 @@ function loadEnvLocal() {
   }
 }
 
+const shellAppCode = process.env.MARINA_LICENSE_APP_CODE;
+
 loadEnvLocal();
 
 const url = String(process.env.MARINA_SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").trim();
 const anonKey = String(
   process.env.MARINA_SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? ""
 ).trim();
-/** Musteri .exe: marina-pos. Gelistirme .env.local farkli olabilir — pack icin MARINA_LICENSE_APP_CODE=marina-pos verin. */
-const appCode = String(process.env.MARINA_LICENSE_APP_CODE ?? "marina-pos").trim() || "marina-pos";
+/** Musteri .exe: marina-pos. .env.local'deki gelistirme app_code release paketine karismaz. */
+const appCode = String(shellAppCode ?? "marina-pos").trim() || "marina-pos";
 
 if (!url || !anonKey) {
   console.error("HATA: Supabase URL veya anon key bos.");
   console.error(`  URL: ${url ? "var" : "YOK"}`);
   console.error(`  ANON: ${anonKey ? "var" : "YOK"}`);
-  console.error("GitHub → Settings → Secrets and variables → Actions → Repository secrets");
-  console.error("  NEXT_PUBLIC_SUPABASE_URL");
-  console.error("  NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  console.error(".env.local dosyasina NEXT_PUBLIC_SUPABASE_URL ve NEXT_PUBLIC_SUPABASE_ANON_KEY ekleyin.");
   process.exit(1);
 }
 

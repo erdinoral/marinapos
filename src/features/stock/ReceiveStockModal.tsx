@@ -6,6 +6,7 @@ import { computeStockAddCosts } from "../../utils/stockCost";
 import { bumpPieceQty, categorySaleUnitOf, formatQtyShort, incomingCostTlToUnitCostKurus } from "../../utils/saleUnit";
 import { StockCostFields } from "./StockCostFields";
 import { buildStockAddInput, defaultCostTlForProduct } from "./stockAddHelpers";
+import { resolveLinePaymentFromPaidTl } from "./linePaidTl";
 import { productHasSupplier, productSupplierIds } from "../../utils/productSuppliers";
 import { clearBulkInvoiceDraft, loadBulkInvoiceDraft, saveBulkInvoiceDraft } from "./bulkInvoiceDraft";
 import type { EditReceiveInvoice, ReceiveCartLine, ReceiveStockPrefill } from "./receiveStockTypes";
@@ -39,7 +40,7 @@ function parseQty(raw: number, unit: CategorySaleUnit): number | null {
 
 type LineCostPreview = { lineCost: number; paid: number; debt: number };
 
-/** Fatura odenen tutarina gore kalan borcu kalemlere son satirdan geriye dagitir. */
+/** Fatura odenen tutarina gore kalemlere odenen tutari son satirdan geriye dagitir. */
 function applyInvoicePaidOntoLines(
   lines: ReceiveCartLine[],
   invoicePaidTl: string,
@@ -47,12 +48,12 @@ function applyInvoicePaidOntoLines(
 ): ReceiveCartLine[] | null {
   let totalKurus = 0;
   for (const line of lines) {
-    totalKurus += preview({ ...line, remainingDebtTl: "" }).lineCost;
+    totalKurus += preview({ ...line, linePaidTl: "" }).lineCost;
   }
 
   const trimmed = String(invoicePaidTl ?? "").trim();
   if (!trimmed) {
-    return lines.map((l) => ({ ...l, remainingDebtTl: "" }));
+    return lines.map((l) => ({ ...l, linePaidTl: "" }));
   }
 
   const paidParsed = parseTrAmount(trimmed);
@@ -69,19 +70,24 @@ function applyInvoicePaidOntoLines(
 
   const debtKurus = totalKurus - paidKurus;
   if (debtKurus <= 0) {
-    return lines.map((l) => ({ ...l, remainingDebtTl: "" }));
+    return lines.map((l) => ({ ...l, linePaidTl: "" }));
   }
 
   let leftKurus = debtKurus;
-  const result = lines.map((l) => ({ ...l, remainingDebtTl: "" }));
+  const result = lines.map((l) => ({ ...l, linePaidTl: "" }));
 
   for (let i = result.length - 1; i >= 0 && leftKurus > 0; i--) {
     const line = result[i];
-    const summary = preview({ ...line, remainingDebtTl: "" });
+    const summary = preview({ ...line, linePaidTl: "" });
     const room = summary.lineCost;
     if (room <= 0) continue;
     const assign = Math.min(leftKurus, room);
-    result[i] = { ...line, remainingDebtTl: (assign / 100).toFixed(2) };
+    const linePaidKurus = room - assign;
+    result[i] = {
+      ...line,
+      linePaidTl:
+        assign >= room ? "0" : linePaidKurus > 0 ? (linePaidKurus / 100).toFixed(2) : ""
+    };
     leftKurus -= assign;
   }
 
@@ -118,7 +124,7 @@ export function ReceiveStockModal({
   const [incomingCostTl, setIncomingCostTl] = useState("");
   const [costMode, setCostMode] = useState<StockCostMode>("product");
   const [invoicePaidTl, setInvoicePaidTl] = useState("");
-  const [remainingDebtTl, setRemainingDebtTl] = useState("");
+  const [linePaidTl, setLinePaidTl] = useState("");
   const [invoiceTotalPaidTl, setInvoiceTotalPaidTl] = useState(
     editInvoice?.invoiceTotalPaidTl ?? bulkDraftOnMount?.invoicePaidTl ?? ""
   );
@@ -183,8 +189,13 @@ export function ReceiveStockModal({
       .sort((a, b) => a.name.localeCompare(b.name, "tr"));
   }, [supplierId, activeProducts, productSearch, categories]);
 
-  const showSupplierPickerBase = !singleProductMode && supplierId > 0 && supplierProducts.length > 0;
+  /** Arama sonucu 0 olsa bile picker + arama kutusu acik kalsin; yoksa UI tek urun moda dusup fatura "kaybolmus" gibi gorunur. */
+  const showSupplierPickerBase = !singleProductMode && supplierId > 0;
   const showSupplierPicker = showSupplierPickerBase && (!isEditMode || showAddProductInEdit);
+  const supplierHasAnyProduct = useMemo(
+    () => (supplierId > 0 ? activeProducts.some((p) => productHasSupplier(p, supplierId)) : false),
+    [supplierId, activeProducts]
+  );
 
   const selectCartLineForEdit = useCallback((line: ReceiveCartLine) => {
     setEditingCartLineId(line.id);
@@ -193,7 +204,7 @@ export function ReceiveStockModal({
     setCostMode(line.costMode);
     setIncomingCostTl(line.incomingCostTl);
     setInvoicePaidTl(line.invoicePaidTl);
-    setRemainingDebtTl(line.remainingDebtTl);
+    setLinePaidTl(line.linePaidTl);
     if (line.supplierId > 0) setSupplierId(line.supplierId);
   }, []);
 
@@ -213,7 +224,7 @@ export function ReceiveStockModal({
       setIncomingCostTl(defaultCostTlForProduct(p, u));
       setCostMode("product");
       setInvoicePaidTl("");
-      setRemainingDebtTl("");
+      setLinePaidTl("");
     },
     [categories, isEditMode, selectCartLineForEdit]
   );
@@ -274,7 +285,7 @@ export function ReceiveStockModal({
     if (prefill?.incomingCostTl) setIncomingCostTl(prefill.incomingCostTl);
     if (prefill?.costMode) setCostMode(prefill.costMode);
     if (prefill?.invoicePaidTl) setInvoicePaidTl(prefill.invoicePaidTl);
-    if (prefill?.remainingDebtTl) setRemainingDebtTl(prefill.remainingDebtTl);
+    if (prefill?.linePaidTl) setLinePaidTl(prefill.linePaidTl);
   }, [initialProduct?.id, resetFormForProduct, initialProduct, prefill, isEditMode]);
 
   const onSupplierChange = (sid: number) => {
@@ -298,7 +309,7 @@ export function ReceiveStockModal({
       window.alert("Urun secin.");
       return null;
     }
-    const raw = parseQty(Number(String(qty).replace(",", ".")), unit);
+    const raw = parseQty(parseTrAmount(String(qty).trim()) ?? NaN, unit);
     if (raw == null) {
       window.alert(unit === "gram" ? "Gram miktar tam sayi olmalidir." : "Miktar gecersiz.");
       return null;
@@ -308,7 +319,16 @@ export function ReceiveStockModal({
       window.alert("Secilen tedarikci bu urun kartinda tanimli degil.");
       return null;
     }
-    const input = buildStockAddInput(selectedProduct, unit, costMode, incomingCostTl, invoicePaidTl, remainingDebtTl, sid);
+    const input = buildStockAddInput(
+      selectedProduct,
+      unit,
+      raw,
+      costMode,
+      incomingCostTl,
+      invoicePaidTl,
+      linePaidTl,
+      sid
+    );
     if (!input) return null;
     return { raw, input, sid };
   };
@@ -328,7 +348,7 @@ export function ReceiveStockModal({
       costMode,
       incomingCostTl,
       invoicePaidTl,
-      remainingDebtTl,
+      linePaidTl,
       supplierId: built.sid
     };
     if (editingCartLineId) {
@@ -337,7 +357,7 @@ export function ReceiveStockModal({
     } else {
       setCart((prev) => [...prev, line]);
       setQty(unit === "gram" ? 1000 : 1);
-      setRemainingDebtTl("");
+      setLinePaidTl("");
     }
     requestAnimationFrame(() => {
       if (pickListRef.current) pickListRef.current.scrollTop = savedScroll;
@@ -396,10 +416,11 @@ export function ReceiveStockModal({
       const input = buildStockAddInput(
         product,
         line.saleUnit,
+        line.qty,
         line.costMode,
         line.incomingCostTl,
         line.invoicePaidTl,
-        line.remainingDebtTl,
+        line.linePaidTl,
         line.supplierId
       );
       if (!input) throw new Error(`"${line.productName}" satiri gecersiz.`);
@@ -450,9 +471,9 @@ export function ReceiveStockModal({
         unitCatalogKurus,
         invoicePaidKurus
       });
-      const debtParsed = parseTrAmount(line.remainingDebtTl);
-      const debt = debtParsed != null && debtParsed > 0 ? tlToKurus(debtParsed) : 0;
-      const paid = Math.max(0, costs.lineCostKurus - debt);
+      const payment = resolveLinePaymentFromPaidTl(line.linePaidTl, costs.lineCostKurus, { alert: () => {} });
+      const paid = payment?.amountPaidKurus ?? costs.lineCostKurus;
+      const debt = payment?.remainingDebtKurus ?? 0;
       return { lineCost: costs.lineCostKurus, paid, debt };
     },
     [activeProducts]
@@ -477,7 +498,7 @@ export function ReceiveStockModal({
     if (invoiceTotalPaidTl.trim()) {
       linesToSave = applyInvoicePaidOntoLines(cart, invoiceTotalPaidTl, previewLine);
     } else if (effectiveBulkEntry) {
-      linesToSave = cart.map((l) => ({ ...l, remainingDebtTl: "" }));
+      linesToSave = cart.map((l) => ({ ...l, linePaidTl: "" }));
     } else {
       linesToSave = cart;
     }
@@ -520,7 +541,7 @@ export function ReceiveStockModal({
   const cartTotals = useMemo(() => {
     let total = 0;
     for (const line of cart) {
-      total += previewLine({ ...line, remainingDebtTl: "" }).lineCost;
+      total += previewLine({ ...line, linePaidTl: "" }).lineCost;
     }
     if (invoicePaidKurusForTotals === null) {
       if (!effectiveBulkEntry) {
@@ -587,12 +608,12 @@ export function ReceiveStockModal({
             onIncomingCostTlChange={setIncomingCostTl}
             invoicePaidTl={invoicePaidTl}
             onInvoicePaidTlChange={setInvoicePaidTl}
-            remainingDebtTl={remainingDebtTl}
-            onRemainingDebtTlChange={setRemainingDebtTl}
+            linePaidTl={linePaidTl}
+            onLinePaidTlChange={setLinePaidTl}
             disabled={saving}
             product={selectedProduct}
             showCostPreview={!isEditMode}
-            hideRemainingDebt={effectiveBulkEntry}
+            hideLinePaid={effectiveBulkEntry}
           />
         </div>
         <div className="stock-receive-detail-actions">
@@ -794,47 +815,59 @@ export function ReceiveStockModal({
                   placeholder="Urun, kod, kategori ara..."
                   value={productSearch}
                   onChange={(e) => setProductSearch(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") e.preventDefault();
+                  }}
                   disabled={saving}
+                  autoComplete="off"
                 />
               </label>
-              <ul ref={pickListRef} className="stock-receive-product-pick" role="listbox" aria-label="Tedarikci urunleri">
-                {supplierProducts.map((p) => {
-                  const u = categorySaleUnitOf(categories, p.categoryId);
-                  const catName = categories.find((c) => c.id === p.categoryId)?.name ?? "";
-                  const inCart = cartProductIds.has(p.id);
-                  return (
-                    <li key={p.id}>
-                      <button
-                        type="button"
-                        role="option"
-                        aria-selected={pickerProductId === p.id}
-                        className={[pickerProductId === p.id ? "active" : "", inCart ? "is-in-cart" : ""].filter(Boolean).join(" ")}
-                        onClick={() => resetFormForProduct(p)}
-                        disabled={saving}
-                      >
-                        <span className="stock-receive-pick-name">
-                          {inCart ? (
-                            <span className="stock-receive-pick-check" aria-label="Listede" title="Listede">
-                              ✓
-                            </span>
-                          ) : null}
-                          <span className="closure-code">{p.code}</span> {p.name}
-                        </span>
-                        <span className="stock-receive-pick-meta muted small">
-                          {catName} · {formatQtyShort(p.stockQty, u)}
-                        </span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
+              {!supplierHasAnyProduct ? (
+                <p className="muted small stock-receive-pick-empty">
+                  Bu tedarikciye bagli aktif urun yok. Urun kartinda birincil veya ek tedarikci olarak ekleyin.
+                </p>
+              ) : supplierProducts.length === 0 ? (
+                <p className="muted small stock-receive-pick-empty" role="status">
+                  Aramaya uygun urun yok. Farkli harf deneyin veya aramayi temizleyin — listeniz korunur.
+                </p>
+              ) : (
+                <ul ref={pickListRef} className="stock-receive-product-pick" role="listbox" aria-label="Tedarikci urunleri">
+                  {supplierProducts.map((p) => {
+                    const u = categorySaleUnitOf(categories, p.categoryId);
+                    const catName = categories.find((c) => c.id === p.categoryId)?.name ?? "";
+                    const inCart = cartProductIds.has(p.id);
+                    return (
+                      <li key={p.id}>
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={pickerProductId === p.id}
+                          className={[pickerProductId === p.id ? "active" : "", inCart ? "is-in-cart" : ""].filter(Boolean).join(" ")}
+                          onClick={() => resetFormForProduct(p)}
+                          disabled={saving}
+                        >
+                          <span className="stock-receive-pick-name">
+                            {inCart ? (
+                              <span className="stock-receive-pick-check" aria-label="Listede" title="Listede">
+                                ✓
+                              </span>
+                            ) : null}
+                            <span className="closure-code">{p.code}</span> {p.name}
+                          </span>
+                          <span className="stock-receive-pick-meta muted small">
+                            {catName} · {formatQtyShort(p.stockQty, u)}
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
             </div>
             {selectedProduct ? renderProductDetailPanel(editingCartLineId ? "Kalemi guncelle" : "Listeye ekle") : (
               <p className="muted small">Stok eklemek icin urun secin.</p>
             )}
           </div>
-        ) : supplierId > 0 ? (
-          <p className="muted small">Bu tedarikciye bagli aktif urun yok. Urun kartinda birincil veya ek tedarikci olarak ekleyin.</p>
         ) : null}
 
         {!showSupplierPicker && selectedProduct ? (
@@ -881,11 +914,11 @@ export function ReceiveStockModal({
               onIncomingCostTlChange={setIncomingCostTl}
               invoicePaidTl={invoicePaidTl}
               onInvoicePaidTlChange={setInvoicePaidTl}
-              remainingDebtTl={remainingDebtTl}
-              onRemainingDebtTlChange={setRemainingDebtTl}
+              linePaidTl={linePaidTl}
+              onLinePaidTlChange={setLinePaidTl}
               disabled={saving}
               product={selectedProduct}
-              hideRemainingDebt={bulkEntry}
+              hideLinePaid={bulkEntry}
             />
           </>
         ) : !showSupplierPicker && !selectedProduct && !(effectiveBulkEntry && supplierId <= 0) ? (
@@ -917,7 +950,7 @@ export function ReceiveStockModal({
           gorunur.
           {effectiveBulkEntry
             ? " Eksik odeme varsa fatura altindaki odenen tutari girin; kalan borc tedarikciye yazilir."
-            : " Eksik odeme varsa urun satirinda kalan borc veya fatura altindaki odenen tutari kullanabilirsiniz."}
+            : " Eksik odeme varsa urun satirinda odenen tutari girin; fark tedarikci borcuna yazilir."}
         </p>
         <div className="modal-actions stock-receive-modal-actions">
           {effectiveBulkEntry && cart.length > 0 && !isEditMode ? (

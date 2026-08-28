@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { getMarinaApi } from "../../api/marinaClient";
 import type { Category, Product, Supplier } from "../../types/models";
+import { parseTrAmount } from "../../utils/currency";
 import { categorySaleUnitOf, formatQtyShort, normalizeGramStockQty } from "../../utils/saleUnit";
 
 type Props = {
@@ -28,7 +29,8 @@ export function StockAdjustModal({ product, categories, suppliers, onClose, onSa
   }, [product.id, product.stockQty, unit]);
 
   const submit = async () => {
-    const n = Math.round(Number(String(counted).replace(",", ".")));
+    const parsed = parseTrAmount(String(counted).trim());
+    const n = parsed == null ? NaN : Math.round(parsed);
     if (!Number.isFinite(n) || n < 0) {
       window.alert("Stok miktari gecersiz.");
       return;
@@ -73,6 +75,9 @@ export function StockAdjustModal({ product, categories, suppliers, onClose, onSa
         <p className="stock-help small">
           Kayitli stok: <strong>{formatQtyShort(product.stockQty, unit)}</strong> — Kod: {product.code} — Tedarikci:{" "}
           {supplierName}
+        </p>
+        <p className="stock-help small">
+          Alana <strong>kalan gercek miktari</strong> yazin. 20 dusürmek icin 20 degil, kayitli stok − 20 girin.
         </p>
         <label className="stock-receive-qty-label">
           {unit === "gram" ? "Gercek stok (gram)" : "Gercek stok (adet)"}

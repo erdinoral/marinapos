@@ -63,6 +63,10 @@ export interface Sale {
   extraFeeKurus?: number;
   paidAmountKurus: number;
   changeAmountKurus: number;
+  /** Karma odeme: nakit kismi (kurus) */
+  cashAmountKurus?: number;
+  /** Karma odeme: kart kismi (kurus) */
+  cardAmountKurus?: number;
   debtAddedKurus?: number;
   debtPaidKurus?: number;
   customerId?: number;
@@ -324,6 +328,10 @@ export class JsonStore {
         vatRatePercent: Math.max(0, Math.min(100, Number(pp.vatRatePercent ?? 20))),
         priceIncludesVat: pp.priceIncludesVat !== false,
         domesticMade: pp.domesticMade === true,
+        pricedInUsd: pp.pricedInUsd === true,
+        priceUsdCents: Math.max(0, Math.round(Number(pp.priceUsdCents ?? 0))),
+        costUsdCents: Math.max(0, Math.round(Number(pp.costUsdCents ?? 0))),
+        costUsdTryRate: Math.max(0, Number(pp.costUsdTryRate ?? 0)),
         lastPriceChangeAt: pp.lastPriceChangeAt ?? "",
         wholesalePriceKurus: isGram ? gramPriceKurusMigrate(wholesalePriceKurus) : wholesalePriceKurus,
         alternatePriceKurus: isGram ? gramPriceKurusMigrate(alternatePriceKurus) : alternatePriceKurus,
@@ -373,16 +381,27 @@ export class JsonStore {
         if (debtAddedKurus == null && (s.kind ?? "sale") === "sale" && s.paymentType === "cash" && subtotalKurus > paidAmountKurus) {
           debtAddedKurus = subtotalKurus - paidAmountKurus;
         }
+        const cashAmtRaw = (s as Partial<Sale>).cashAmountKurus;
+        const cardAmtRaw = (s as Partial<Sale>).cardAmountKurus;
+        const cashAmountKurus =
+          cashAmtRaw != null && Number.isFinite(Number(cashAmtRaw)) ? Math.max(0, Math.round(Number(cashAmtRaw))) : undefined;
+        const cardAmountKurus =
+          cardAmtRaw != null && Number.isFinite(Number(cardAmtRaw)) ? Math.max(0, Math.round(Number(cardAmtRaw))) : undefined;
+        const paymentType: PaymentType =
+          s.paymentType === "card" ? "card" : s.paymentType === "mixed" ? "mixed" : "cash";
         return {
           ...s,
           kind: s.kind ?? "sale",
+          paymentType,
           cartName: (s as Partial<Sale>).cartName ?? "Sepet 1",
           subtotalKurus,
           paidAmountKurus,
           changeAmountKurus: Math.max(0, changeAmountKurus),
           ...(customerId != null ? { customerId } : {}),
           ...(extraFeeKurus != null && extraFeeKurus > 0 ? { extraFeeKurus } : {}),
-          ...(debtAddedKurus != null && debtAddedKurus > 0 ? { debtAddedKurus } : {})
+          ...(debtAddedKurus != null && debtAddedKurus > 0 ? { debtAddedKurus } : {}),
+          ...(cashAmountKurus != null && cashAmountKurus > 0 ? { cashAmountKurus } : {}),
+          ...(cardAmountKurus != null && cardAmountKurus > 0 ? { cardAmountKurus } : {})
         };
       }),
       saleItems: (parsed.saleItems ?? []).map((i) => {

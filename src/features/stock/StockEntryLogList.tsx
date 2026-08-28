@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import type { Category, CategorySaleUnit, Product, StockEntryLogRow } from "../../types/models";
-import { formatTry } from "../../utils/currency";
+import { formatTry, formatTlTable } from "../../utils/currency";
 import {
   resolveStockEntryUnitCostKurus,
   stockCostModeLabel,
@@ -18,7 +18,9 @@ import {
 function stockEntryUnitCostLabel(entry: StockEntryLogRow, unit: CategorySaleUnit): string {
   const kurus = resolveStockEntryUnitCostKurus(entry, unit);
   if (kurus == null || kurus <= 0) return "—";
-  if (unit === "gram") return `${kurusPerGramToTlPer1000g(kurus)} / 1000 g`;
+  if (unit === "gram") {
+    return `${formatTlTable(kurusPerGramToTlPer1000g(kurus)).replace(" ₺", "")} / 1000 g`;
+  }
   return `${formatTry(kurus)} / adet`;
 }
 

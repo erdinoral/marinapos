@@ -1,5 +1,9 @@
 import { useState, type KeyboardEvent } from "react";
-import { signInAccount, signUpAccount } from "../../services/accountAuth";
+import {
+  requestAccountPasswordReset,
+  signInAccount,
+  signUpAccount
+} from "../../services/accountAuth";
 
 type AuthMode = "login" | "register";
 
@@ -54,7 +58,9 @@ export function AccountAuthPanel({ onAuthenticated }: Props) {
       });
       if (result.needsEmailConfirmation) {
         setMsgOk(true);
-        setMsg("Kayit olusturuldu. E-posta kutunuzdeki dogrulama linkine tiklayin, ardindan giris yapin.");
+        setMsg(
+          "Kayit olusturuldu. E-postadaki dogrulama linkine tiklayin (acilan sayfa onay verir), sonra Marina POS'ta giris yapin."
+        );
         setMode("login");
         setPassword("");
         setPassword2("");
@@ -63,6 +69,26 @@ export function AccountAuthPanel({ onAuthenticated }: Props) {
       if (result.user) onAuthenticated();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Islem basarisiz.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const sendReset = async () => {
+    setMsg("");
+    setMsgOk(false);
+    const mail = email.trim();
+    if (!mail.includes("@")) {
+      setMsg("Sifirlama icin e-posta adresinizi yazin.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await requestAccountPasswordReset(mail);
+      setMsgOk(true);
+      setMsg("Sifre sifirlama linki e-postaniza gonderildi (uyelik sifresi). PIN icin degil.");
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "E-posta gonderilemedi.");
     } finally {
       setBusy(false);
     }
@@ -159,6 +185,11 @@ export function AccountAuthPanel({ onAuthenticated }: Props) {
       <button type="button" className="account-auth-submit" disabled={busy} onClick={() => void submit()}>
         {busy ? "Bekleyin…" : mode === "login" ? "Giris yap" : "Hesap olustur"}
       </button>
+      {mode === "login" ? (
+        <button type="button" className="account-auth-forgot" disabled={busy} onClick={() => void sendReset()}>
+          Uyelik sifremi unuttum
+        </button>
+      ) : null}
     </div>
   );
 }

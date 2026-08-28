@@ -9,9 +9,10 @@ import { AccountProfileFeedbackTab } from "./AccountProfileFeedbackTab";
 import { AccountProfileInfoTab } from "./AccountProfileInfoTab";
 import { AccountProfileLegalSupportCard } from "./AccountProfileLegalSupportCard";
 import { AccountProfileLicenseTab } from "./AccountProfileLicenseTab";
+import { AccountProfilePinTab } from "./AccountProfilePinTab";
 import { AccountProfileSecurityTab } from "./AccountProfileSecurityTab";
 
-type ProfileTab = "info" | "company" | "security" | "license";
+type ProfileTab = "info" | "company" | "pin" | "security" | "license";
 
 type Props = {
   user: AccountUser;
@@ -115,6 +116,15 @@ export function AccountProfilePanel({
               <button
                 type="button"
                 role="tab"
+                aria-selected={profileTab === "pin"}
+                className={`account-tab-pin${profileTab === "pin" ? " active" : ""}`}
+                onClick={() => setProfileTab("pin")}
+              >
+                PIN
+              </button>
+              <button
+                type="button"
+                role="tab"
                 aria-selected={profileTab === "company"}
                 className={profileTab === "company" ? "active" : ""}
                 onClick={() => setProfileTab("company")}
@@ -145,7 +155,8 @@ export function AccountProfilePanel({
               <AccountProfileInfoTab user={user} onUserChange={onUserChange} onSignedOut={onSignedOut} />
             ) : null}
             {profileTab === "company" ? <AccountProfileCompanyTab onCompanySaved={() => void handleCompanySaved()} /> : null}
-            {profileTab === "security" ? <AccountProfileSecurityTab /> : null}
+            {profileTab === "pin" ? <AccountProfilePinTab active={profileTab === "pin"} /> : null}
+            {profileTab === "security" ? <AccountProfileSecurityTab onOpenPinTab={() => setProfileTab("pin")} /> : null}
             {profileTab === "license" ? <AccountProfileLicenseTab onOpenSettings={onOpenSettings} /> : null}
           </div>
         </section>
@@ -155,7 +166,10 @@ export function AccountProfilePanel({
             Uygulama
           </div>
           <div className="account-profile-column-body">
-            <AccountProfileAppColumn onOpenSettings={onOpenSettings} />
+            <AccountProfileAppColumn
+              onOpenSettings={onOpenSettings}
+              onOpenPinTab={() => setProfileTab("pin")}
+            />
           </div>
         </section>
 

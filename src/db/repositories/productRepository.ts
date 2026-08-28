@@ -66,9 +66,15 @@ export class ProductRepository {
   }
 
   list(): Product[] {
+    // Kopya don: UI state ile store ayni nesneyi paylasmasin (stok degince
+    // satir adedi guncellenip ozet tutarlarin memo'da eski kalmasi engellenir).
     return this.store
       .getState()
       .products.filter((x) => x.isActive === 1)
+      .map((p) => ({
+        ...p,
+        alternateSupplierIds: normalizeAlternateSupplierIds(p.alternateSupplierIds, p.supplierId)
+      }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
@@ -90,7 +96,7 @@ export class ProductRepository {
   }
 
   listStockCostLayers() {
-    return this.store.getState().stockCostLayers.slice();
+    return this.store.getState().stockCostLayers.map((l) => ({ ...l }));
   }
 
   listSuppliers(): Supplier[] {
@@ -240,6 +246,13 @@ export class ProductRepository {
       vatRatePercent: Math.max(0, Math.min(100, Number(payload.vatRatePercent ?? 20))),
       priceIncludesVat: Boolean(payload.priceIncludesVat),
       domesticMade: payload.domesticMade === true,
+      pricedInUsd: payload.pricedInUsd === true,
+      priceUsdCents:
+        payload.pricedInUsd === true ? Math.max(0, Math.round(Number(payload.priceUsdCents ?? 0))) : 0,
+      costUsdCents:
+        payload.pricedInUsd === true ? Math.max(0, Math.round(Number(payload.costUsdCents ?? 0))) : 0,
+      costUsdTryRate:
+        payload.pricedInUsd === true ? Math.max(0, Number(payload.costUsdTryRate ?? 0)) : 0,
       lastPriceChangeAt: nowIso,
       wholesalePriceKurus: Math.max(0, Math.round(Number(payload.wholesalePriceKurus ?? 0))),
       alternatePriceKurus: Math.max(0, Math.round(Number(payload.alternatePriceKurus ?? 0))),
@@ -317,7 +330,9 @@ export class ProductRepository {
     }
     if (patch.categoryId != null) {
       const categoryId = Math.max(0, Math.floor(Number(patch.categoryId)));
-      if (categoryId <= 0) throw new Error("Kategori secimi gecersiz.");
+      if (categoryId > 0 && !state.categories.some((c) => c.id === categoryId)) {
+        throw new Error("Kategori bulunamadi.");
+      }
       product.categoryId = categoryId;
     }
     if (patch.priceKurus != null) {
@@ -348,6 +363,15 @@ export class ProductRepository {
     if (patch.vatRatePercent != null) product.vatRatePercent = Math.max(0, Math.min(100, Number(patch.vatRatePercent)));
     if (patch.priceIncludesVat != null) product.priceIncludesVat = Boolean(patch.priceIncludesVat);
     if (patch.domesticMade != null) product.domesticMade = Boolean(patch.domesticMade);
+    if (patch.pricedInUsd != null) product.pricedInUsd = Boolean(patch.pricedInUsd);
+    if (patch.priceUsdCents != null) product.priceUsdCents = Math.max(0, Math.round(Number(patch.priceUsdCents)));
+    if (patch.costUsdCents != null) product.costUsdCents = Math.max(0, Math.round(Number(patch.costUsdCents)));
+    if (patch.costUsdTryRate != null) product.costUsdTryRate = Math.max(0, Number(patch.costUsdTryRate));
+    if (product.pricedInUsd !== true) {
+      product.priceUsdCents = 0;
+      product.costUsdCents = 0;
+      product.costUsdTryRate = 0;
+    }
     if (patch.wholesalePriceKurus != null) product.wholesalePriceKurus = Math.max(0, Math.round(patch.wholesalePriceKurus));
     if (patch.alternatePriceKurus != null) product.alternatePriceKurus = Math.max(0, Math.round(patch.alternatePriceKurus));
     if (patch.posFavorite != null) product.posFavorite = patch.posFavorite === 1 ? 1 : 0;
@@ -359,7 +383,16 @@ export class ProductRepository {
         nextStock = Math.round(nextStock);
         if (!Number.isInteger(nextStock)) throw new Error("Gram stok tam sayi olmalidir.");
       }
+      const previousQty = product.stockQty;
       product.stockQty = nextStock;
+      // Urun kartindan stok degisince FIFO maliyet katmanlarini da esitle; aksi halde
+      // Stok ekranindaki maliyet/ciro tutarlari eski partilerden hesaplanip degismiyormus gibi gorunur.
+      if (nextStock !== previousQty) {
+        const saleUnit = cat?.saleUnit === "gram" ? "gram" : "piece";
+        const unit =
+          activeFifoUnitCostKurus(state, product.id) || Math.max(0, Math.round(Number(product.costPriceKurus) || 0));
+        resetFifoLayersToQty(state, product.id, nextStock, unit, saleUnit);
+      }
     }
     this.store.save();
   }
@@ -374,12 +407,15 @@ export class ProductRepository {
 
   deleteCategory(categoryId: number) {
     const state = this.store.getState();
-    if (state.products.some((p) => p.categoryId === categoryId)) {
+    if (state.products.some((p) => p.categoryId === categoryId && p.isActive === 1)) {
       throw new Error("Bu kategoride urun var; once urunleri baska kategoriye alin veya silin.");
     }
     const before = state.categories.length;
     state.categories = state.categories.filter((c) => c.id !== categoryId);
     if (state.categories.length === before) throw new Error("Kategori bulunamadi.");
+    for (const p of state.products) {
+      if (p.categoryId === categoryId) p.categoryId = 0;
+    }
     this.store.save();
   }
 
@@ -533,7 +569,9 @@ export class ProductRepository {
     }
     const previousQty = product.stockQty;
     const diff = countedQty - previousQty;
-    if (diff === 0) return;
+    if (diff === 0) {
+      throw new Error("Stok zaten bu miktarda; degisiklik yok.");
+    }
     product.stockQty = countedQty;
     state.sequences.stockMovementId += 1;
     const sign = diff > 0 ? "+" : "-";

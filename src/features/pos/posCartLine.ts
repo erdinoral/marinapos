@@ -11,6 +11,7 @@ import {
   normalizeGramCartQty,
   tlPer1000gToKurusPerGram
 } from "../../utils/saleUnit";
+import { effectiveProductCostKurus, effectiveProductPriceKurus, getCachedUsdTry } from "../../utils/usdPricing";
 
 export type CartPriceSource = "retail" | "wholesale" | "alternate";
 
@@ -27,22 +28,38 @@ export type PosCartLine = Product & {
   manualLineTotalTlWhole: number | null;
 };
 
+/** Katalog / sepet satiri icin guncel TL birim (dolar urunde kurdan) */
+export function liveRetailUnitKurus(p: Pick<Product, "pricedInUsd" | "priceUsdCents" | "priceKurus">): number {
+  return effectiveProductPriceKurus(p, getCachedUsdTry());
+}
+
+export function liveCostUnitKurus(p: Pick<Product, "pricedInUsd" | "costUsdCents" | "costPriceKurus">): number {
+  return effectiveProductCostKurus(p, getCachedUsdTry());
+}
+
 export function baseUnitKurusFromSource(p: PosCartLine, useCardListPrice = false): number {
   if (p.manualUnitPriceKurus != null) return p.manualUnitPriceKurus;
   /** Sepette Toptan seciliyse odeme Kart olsa bile kart fiyati toptani ezmesin */
-  if (p.priceSource === "wholesale") return p.wholesalePriceKurus > 0 ? p.wholesalePriceKurus : p.priceKurus;
+  if (p.priceSource === "wholesale") {
+    return p.wholesalePriceKurus > 0 ? p.wholesalePriceKurus : liveRetailUnitKurus(p);
+  }
   if (useCardListPrice && p.alternatePriceKurus > 0) return p.alternatePriceKurus;
-  if (p.priceSource === "alternate") return p.alternatePriceKurus > 0 ? p.alternatePriceKurus : p.priceKurus;
-  return p.priceKurus;
+  if (p.priceSource === "alternate") return p.alternatePriceKurus > 0 ? p.alternatePriceKurus : liveRetailUnitKurus(p);
+  return liveRetailUnitKurus(p);
 }
 
-function discountFactor(p: PosCartLine, customerLineDiscountPercent = 0): number {
-  /** Elle birim veya toptan satirda urun karti indirimi uygulanmaz */
+/** Urun karti + musteri indirimi (birim fiyata) */
+function unitDiscountFactor(p: PosCartLine, customerLineDiscountPercent = 0): number {
   const skipProductDiscount = p.manualUnitPriceKurus != null || p.priceSource === "wholesale";
   const d1 = skipProductDiscount ? 0 : Math.max(0, Math.min(100, Number(p.discountPercent ?? 0)));
-  const d2 = Math.max(0, Math.min(100, Number(p.lineExtraDiscountPercent ?? 0)));
   const d3 = Math.max(0, Math.min(100, Number(customerLineDiscountPercent ?? 0)));
-  return ((100 - d1) / 100) * ((100 - d2) / 100) * ((100 - d3) / 100);
+  return ((100 - d1) / 100) * ((100 - d3) / 100);
+}
+
+/** Sepet satir Ind.% — birim fiyata degil, satir toplamina uygulanir */
+export function lineExtraDiscountFactor(p: PosCartLine): number {
+  const d2 = Math.max(0, Math.min(100, Number(p.lineExtraDiscountPercent ?? 0)));
+  return (100 - d2) / 100;
 }
 
 /** Gram: satir tutari = (TL / 1000 g × gram) / 1000 */
@@ -50,16 +67,37 @@ export function gramCartLineTotalTl(tlPer1000g: number, grams: number): number {
   return gramLineTotalTl(tlPer1000g, grams);
 }
 
-/** Gram: indirimli birim fiyat TL / 1000 g */
+/** Gram: birim fiyat TL / 1000 g (satir Ind.% birimden dusulmez) */
 export function effectiveTlPer1000gForLine(
   p: PosCartLine,
   customerLineDiscountPercent = 0,
   useCardListPrice = false
 ): number {
   const baseTl = kurusPerGramToTlPer1000g(baseUnitKurusFromSource(p, useCardListPrice));
-  return Math.round(baseTl * discountFactor(p, customerLineDiscountPercent) * 100) / 100;
+  return Math.round(baseTl * unitDiscountFactor(p, customerLineDiscountPercent) * 100) / 100;
 }
 
+/** Gram: Ind.% oncesi satir tutari TL */
+export function gramBaseLineTotalTlForCart(
+  line: PosCartLine,
+  categories: Category[],
+  customerLineDiscountPercent = 0,
+  useCardListPrice = false
+): number {
+  if (categorySaleUnitOf(categories, line.categoryId) !== "gram") return 0;
+  if (line.manualLineTotalTlWhole != null && line.manualLineTotalTlWhole > 0) {
+    return line.manualLineTotalTlWhole;
+  }
+  return gramLineTotalTl(
+    effectiveTlPer1000gForLine(line, customerLineDiscountPercent, useCardListPrice),
+    normalizeGramCartQty(line.qty)
+  );
+}
+
+/**
+ * Liste / sepet birim fiyati (kurus).
+ * Adet ve gramda satir Ind.% birime uygulanmaz — toplamdan dusulur.
+ */
 export function effectiveUnitKurusForLine(
   p: PosCartLine,
   customerLineDiscountPercent = 0,
@@ -71,7 +109,7 @@ export function effectiveUnitKurusForLine(
     return tlPer1000gToKurusPerGram(effectiveTlPer1000gForLine(p, customerLineDiscountPercent, useCardListPrice));
   }
   const base = baseUnitKurusFromSource(p, useCardListPrice);
-  return Math.round(base * discountFactor(p, customerLineDiscountPercent));
+  return Math.round(base * unitDiscountFactor(p, customerLineDiscountPercent));
 }
 
 /** Liste birim fiyati: adet = kurus/adet; gram = paket kurus (1000 g) */
@@ -99,7 +137,7 @@ export function recalcGramQtyFromFixedTl(
   return gramsFromWholeLineTotalTl(totalTlWhole, tlPer1000);
 }
 
-/** Gram satir tutari TL */
+/** Satir tutari TL — Ind.% toplamdan dusulur, birim sabit kalir */
 export function lineTotalTlForCart(
   line: PosCartLine,
   categories: Category[],
@@ -108,16 +146,12 @@ export function lineTotalTlForCart(
 ): number {
   const unit = categorySaleUnitOf(categories, line.categoryId);
   if (unit === "gram") {
-    if (line.manualLineTotalTlWhole != null && line.manualLineTotalTlWhole > 0) {
-      return line.manualLineTotalTlWhole;
-    }
-    return gramLineTotalTl(
-      effectiveTlPer1000gForLine(line, customerLineDiscountPercent, useCardListPrice),
-      normalizeGramCartQty(line.qty)
-    );
+    const base = gramBaseLineTotalTlForCart(line, categories, customerLineDiscountPercent, useCardListPrice);
+    return Math.round(base * lineExtraDiscountFactor(line) * 100) / 100;
   }
-  const effective = effectiveUnitKurusForLine(line, customerLineDiscountPercent, useCardListPrice, categories);
-  return kurusToTl(Math.round(effective * line.qty));
+  const unitKurus = effectiveUnitKurusForLine(line, customerLineDiscountPercent, useCardListPrice, categories);
+  const baseKurus = Math.round(unitKurus * line.qty);
+  return kurusToTl(Math.round(baseKurus * lineExtraDiscountFactor(line)));
 }
 
 /** Satir tutari kurus (gram hesabi TL uzerinden) */
@@ -129,7 +163,8 @@ export function lineTotalKurusForCart(
 ): number {
   const unit = categorySaleUnitOf(categories, line.categoryId);
   if (unit === "gram") return tlToKurus(lineTotalTlForCart(line, categories, customerLineDiscountPercent, useCardListPrice));
-  return Math.round(effectiveUnitKurusForLine(line, customerLineDiscountPercent, useCardListPrice, categories) * line.qty);
+  const unitKurus = effectiveUnitKurusForLine(line, customerLineDiscountPercent, useCardListPrice, categories);
+  return Math.round(Math.round(unitKurus * line.qty) * lineExtraDiscountFactor(line));
 }
 
 export function lineToSaleInput(
@@ -141,12 +176,9 @@ export function lineToSaleInput(
   const unit = categorySaleUnitOf(categories, line.categoryId);
   const qty = unit === "gram" ? normalizeGramCartQty(line.qty) : Math.round(line.qty);
   const unitPriceKurus = effectiveUnitKurusForLine(line, customerLineDiscountPercent, useCardListPrice, categories);
+  const lineTotalKurus = lineTotalKurusForCart(line, categories, customerLineDiscountPercent, useCardListPrice);
   if (unit === "gram") {
-    const cost = line.manualUnitCostKurus ?? line.costPriceKurus ?? 0;
-    const lineTotalKurus =
-      line.manualLineTotalTlWhole != null && line.manualLineTotalTlWhole > 0
-        ? tlToKurus(line.manualLineTotalTlWhole)
-        : undefined;
+    const cost = line.manualUnitCostKurus ?? liveCostUnitKurus(line);
     return {
       productId: line.id,
       qty,
@@ -155,7 +187,7 @@ export function lineToSaleInput(
       lineTotalKurus
     };
   }
-  return { productId: line.id, qty, unitPriceKurus };
+  return { productId: line.id, qty, unitPriceKurus, lineTotalKurus };
 }
 
 export function newLineFromProduct(product: Product, qty: number, priceSource: CartPriceSource): PosCartLine {

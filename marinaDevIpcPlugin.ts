@@ -12,6 +12,9 @@ import { githubReleasesPageUrl } from "./src/config/githubRelease";
 import { LICENSE_APP_CODE } from "./src/config/licenseApp";
 import { readSupabaseCredentialsFromEnv } from "./src/config/supabaseEnv";
 import { loadEnvLocal } from "./electron/loadEnvLocal";
+import { MobileLanServer } from "./electron/localApiServer";
+import { sharedPosCart } from "./electron/sharedPosCart";
+import { mobileApkQrDataUrl, mobileLanQrDataUrl } from "./electron/mobileQr";
 import { activateLicenseKey, runLicenseCheck } from "./src/services/licenseService";
 import {
   submitAppFeedback,
@@ -167,6 +170,29 @@ function readBody(req: IncomingMessage): Promise<string> {
 
 function dispatch(db: DatabaseService, logs: ErrorLogService, channel: string, args: unknown[]): unknown {
   switch (channel) {
+    case "mobile:get-status":
+      return devMobileLanServer(db).getStatus();
+    case "mobile:set-enabled":
+      return devMobileLanServer(db).setEnabled(Boolean(args[0]));
+    case "mobile:regenerate-token":
+      return devMobileLanServer(db).regenerateToken();
+    case "mobile:get-pair-payload":
+      return devMobileLanServer(db).getPairPayload();
+    case "mobile:get-qr-dataurl":
+      return mobileLanQrDataUrl(devMobileLanServer(db));
+    case "mobile:get-apk-qr-dataurl":
+      return mobileApkQrDataUrl(devMobileLanServer(db));
+    case "pos-cart:pull":
+      return sharedPosCart.getSnapshot();
+    case "pos-cart:push":
+      sharedPosCart.pushFromPc(Number((args[0] as { activeCartId?: number })?.activeCartId) || 1, (args[0] as { lines?: unknown })?.lines as import("./src/types/sharedPosCart").SharedPosCartLineDto[] ?? []);
+      return sharedPosCart.getSnapshot();
+    case "pos-cart:ack-ops":
+      sharedPosCart.ackOps(Array.isArray(args[0]) ? args[0].map(String) : []);
+      return sharedPosCart.getSnapshot();
+    case "pos-cart:clear":
+      sharedPosCart.clear();
+      return sharedPosCart.getSnapshot();
     case "products:list":
       return db.products.list();
     case "products:list-stock-cost-layers":
@@ -252,7 +278,8 @@ function dispatch(db: DatabaseService, logs: ErrorLogService, channel: string, a
         ((args[3] as SaleKind | undefined) ?? "sale") as SaleKind,
         String(args[4] ?? "Sepet 1"),
         args[5] as number | null | undefined,
-        Number(args[6]) || 0
+        Number(args[6]) || 0,
+        (args[7] as { cashAmountKurus: number; cardAmountKurus: number } | null | undefined) ?? null
       );
     case "sales:record-debt-payment":
       return db.sales.recordDebtPayment(
@@ -415,6 +442,9 @@ function dispatch(db: DatabaseService, logs: ErrorLogService, channel: string, a
       }
       return new ClosureService(db).runClosureForToday(actualCashKurus);
     }
+    case "print:html":
+      // Electron main'de gercek yazdirma var; Vite-only'de iframe fallback kullanilir
+      return { ok: false as const, error: "Dev sunucuda print:html yok; iframe yazdirma kullanin." };
     case "shell:show-item-in-folder":
       showItemInFolderDev(String(args[0] ?? ""));
       return null;
@@ -452,6 +482,16 @@ function dispatch(db: DatabaseService, logs: ErrorLogService, channel: string, a
     default:
       throw new Error(`Bilinmeyen kanal: ${channel}`);
   }
+}
+
+let devMobileLan: MobileLanServer | null = null;
+
+function devMobileLanServer(db: DatabaseService): MobileLanServer {
+  if (!devMobileLan) {
+    devMobileLan = new MobileLanServer(db, path.join(process.cwd(), "data"), process.env.npm_package_version ?? "dev");
+    devMobileLan.init();
+  }
+  return devMobileLan;
 }
 
 export function marinaDevIpcPlugin(): Plugin {

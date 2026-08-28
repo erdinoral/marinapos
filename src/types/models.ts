@@ -53,8 +53,14 @@ export type FeedbackReplyItem = {
   repliedAt: string | null;
 };
 
-export type PaymentType = "cash" | "card";
+export type PaymentType = "cash" | "card" | "mixed";
 export type SaleKind = "sale" | "return" | "debt_payment";
+
+/** Karma odeme: nakit + kart tutarlari (kurus) */
+export interface PaymentSplitAmounts {
+  cashAmountKurus: number;
+  cardAmountKurus: number;
+}
 
 export type LicenseState =
   | "active"
@@ -102,6 +108,20 @@ export interface Product {
   priceIncludesVat: boolean;
   /** Yerli üretim */
   domesticMade: boolean;
+  /**
+   * true ise satis/gelis dolar cinsinden tutulur; TL kurus guncel USD/TRY kurundan hesaplanir.
+   * Ithal urunler icin.
+   */
+  pricedInUsd: boolean;
+  /** Satis fiyati ABD dolari cent (orn. 600 = 6.00 USD). pricedInUsd degilse 0. */
+  priceUsdCents: number;
+  /** Gelis / maliyet ABD dolari cent. pricedInUsd degilse 0. */
+  costUsdCents: number;
+  /**
+   * Gelis anindaki USD/TRY kuru (hangi kurdan geldi).
+   * Maliyet TL = costUsd × bu kur (yuvarlamali). Satis guncel kurdan hesaplanir.
+   */
+  costUsdTryRate: number;
   /** Son perakende fiyat güncellemesi (ISO) */
   lastPriceChangeAt: string;
   /** 0 ise perakende fiyat kullanılır */
@@ -131,6 +151,11 @@ export interface ProductInput {
   vatRatePercent?: number;
   priceIncludesVat?: boolean;
   domesticMade?: boolean;
+  pricedInUsd?: boolean;
+  priceUsdCents?: number;
+  costUsdCents?: number;
+  /** Gelis kuru USD/TRY; pricedInUsd iken zorunlu sayilir */
+  costUsdTryRate?: number;
   wholesalePriceKurus?: number;
   /** Kart odemede birim fiyat (kurus); bos/0 ise liste fiyati */
   alternatePriceKurus?: number;
@@ -147,7 +172,7 @@ export interface SaleLineInput {
   unitPriceKurus?: number;
   /** Gram satista: kurus/gram gelis (tartili satis); yoksa urun kartindaki maliyet */
   unitCostKurus?: number;
-  /** Gram satista: tutar alanindan sabitlenen satir toplami (kurus) */
+  /** Satir toplami (kurus). Ind.% / ozel tutar varsa birim*adet yerine bunu kullan. */
   lineTotalKurus?: number;
 }
 
@@ -305,6 +330,10 @@ export interface SaleRecord {
   extraFeeKurus?: number;
   paidAmountKurus: number;
   changeAmountKurus: number;
+  /** Karma odeme: nakit kismi (kurus) */
+  cashAmountKurus?: number;
+  /** Karma odeme: kart kismi (kurus) */
+  cardAmountKurus?: number;
   /** Bu satista musteriye eklenen eksik odeme borcu (kurus) */
   debtAddedKurus?: number;
   /** Bu satista mevcut borctan dusulen tutar (fazla tahsilat, kurus) */
@@ -384,6 +413,8 @@ export interface TopSellingProduct {
   productCode: string;
   qty: number;
   revenueKurus: number;
+  /** Adet veya gramajli kategori */
+  saleUnit: CategorySaleUnit;
 }
 
 export interface DashboardReport {
@@ -615,6 +646,32 @@ export interface MonthEndReport {
 }
 
 /** Gunluk kapanis raporu (runClosure sonucu) */
+/** PC yerel ag sunucusu — Android baglanti durumu */
+export interface MobileLanStatus {
+  enabled: boolean;
+  running: boolean;
+  host: string;
+  port: number;
+  tokenMasked: string;
+  companyName: string;
+  appVersion: string;
+  apkAvailable: boolean;
+  apkFilename: string;
+  apkSizeBytes: number;
+  apkDownloadUrl: string;
+  apkInstallPageUrl: string;
+}
+
+/** QR kod icerigi (JSON string olarak kodlanir) */
+export interface MobileLanPairPayload {
+  v: 1;
+  app: "marina-pos";
+  host: string;
+  port: number;
+  token: string;
+  name: string;
+}
+
 export interface ClosureRunResult {
   date: string;
   reportPath: string;
@@ -660,7 +717,8 @@ declare global {
         kind?: SaleKind,
         cartName?: string,
         customerId?: number | null,
-        extraFeeKurus?: number
+        extraFeeKurus?: number,
+        paymentSplit?: PaymentSplitAmounts | null
       ) => Promise<void>;
       recordCustomerDebtPayment: (
         customerId: number,
@@ -732,6 +790,11 @@ declare global {
       addLog: (level: "error" | "warn" | "info", message: string) => Promise<void>;
       runClosure: (actualCashKurus?: number) => Promise<ClosureRunResult>;
       showItemInFolder: (fullPath: string) => Promise<void>;
+      /** HTML etiket/fatura yazdir (Electron webContents.print) */
+      printHtml?: (
+        html: string,
+        opts?: { widthMm?: number; heightMm?: number; title?: string }
+      ) => Promise<{ ok: true } | { ok: false; error: string }>;
       exportXlsx: (date: string) => Promise<string>;
       exportMonthlyProfitXlsx: (yearMonth: string) => Promise<string>;
       listTobaccoAromas: () => Promise<TobaccoAroma[]>;
@@ -760,6 +823,16 @@ declare global {
       downloadAppUpdate: () => Promise<AppUpdateInfo>;
       installAppUpdate: () => Promise<void>;
       onAppUpdateState?: (callback: (info: AppUpdateInfo) => void) => () => void;
+      getMobileLanStatus: () => Promise<MobileLanStatus>;
+      setMobileLanEnabled: (enabled: boolean) => Promise<MobileLanStatus>;
+      regenerateMobileLanToken: () => Promise<MobileLanStatus>;
+      getMobileLanPairPayload: () => Promise<MobileLanPairPayload>;
+      getMobileLanQrDataUrl: () => Promise<string>;
+      getMobileApkQrDataUrl: () => Promise<string>;
+      posCartPull: () => Promise<import("./sharedPosCart").SharedPosCartSnapshot>;
+      posCartPush: (payload: import("./sharedPosCart").SharedPosCartPushInput) => Promise<import("./sharedPosCart").SharedPosCartSnapshot>;
+      posCartAckOps: (opIds: string[]) => Promise<import("./sharedPosCart").SharedPosCartSnapshot>;
+      posCartClear: () => Promise<import("./sharedPosCart").SharedPosCartSnapshot>;
     };
   }
 }

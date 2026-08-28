@@ -18,11 +18,15 @@ import { AccountScreen } from "../features/account/AccountScreen";
 import { TobaccoContentScreen } from "../features/tobacco/TobaccoContentScreen";
 import { SplashScreen } from "../features/splash/SplashScreen";
 import { LicenseLockScreen } from "../features/license/LicenseLockScreen";
+import { PinLockScreen } from "../features/pin/PinLockScreen";
 import { LICENSE_CHECK_INTERVAL_MS } from "../config/license";
 import { Category, LicenseStatus, Product, Settings, Supplier } from "../types/models";
 import logoSrc from "../assets/marina-logo.png";
 import { BrandTitle, DEFAULT_APP_TITLE } from "./BrandTitle";
 import { useKeyboardFocusRecovery } from "../hooks/useKeyboardFocusRecovery";
+import { MobileConnectModal, TopbarMobileButton } from "../features/settings/MobileConnectModal";
+import { UpdateNoticePopup, shouldShowUpdateNotice } from "../features/update/UpdateNoticePopup";
+import { FxRatesFooter } from "../features/fx/FxRatesFooter";
 
 type Tab = "pos" | "tobacco" | "stock" | "product" | "closure" | "table" | "report" | "account" | "settings";
 type ReportSubTab = "dashboard" | "cashflow" | "monthend";
@@ -32,6 +36,7 @@ export function App() {
   const [showSplash, setShowSplash] = useState(true);
   const [licenseStatus, setLicenseStatus] = useState<LicenseStatus | null>(null);
   const [licenseChecking, setLicenseChecking] = useState(false);
+  const [pinUnlocked, setPinUnlocked] = useState(false);
   const [legalOpen, setLegalOpen] = useState<LegalKind | null>(null);
   const [tab, setTab] = useState<Tab>("pos");
   const [reportSub, setReportSub] = useState<ReportSubTab>("dashboard");
@@ -61,6 +66,8 @@ export function App() {
   );
   const [footerDate, setFooterDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [pendingReturnSaleId, setPendingReturnSaleId] = useState<number | null>(null);
+  const [mobileConnectOpen, setMobileConnectOpen] = useState(false);
+  const [updateNoticeOpen, setUpdateNoticeOpen] = useState(false);
 
   const refresh = useCallback(async () => {
     const api = getMarinaApi();
@@ -170,6 +177,17 @@ export function App() {
     return () => window.clearInterval(id);
   }, [showSplash, runLicenseCheck]);
 
+  /** PIN sonrasi: sadece yeni surumde bir kez guncelleme pop-up */
+  useEffect(() => {
+    if (!pinUnlocked) {
+      setUpdateNoticeOpen(false);
+      return;
+    }
+    if (!shouldShowUpdateNotice()) return;
+    const t = window.setTimeout(() => setUpdateNoticeOpen(true), 500);
+    return () => window.clearTimeout(t);
+  }, [pinUnlocked]);
+
   if (showSplash) {
     return <SplashScreen />;
   }
@@ -183,6 +201,10 @@ export function App() {
         onActivate={(key) => activateLicense(key)}
       />
     );
+  }
+
+  if (!pinUnlocked) {
+    return <PinLockScreen onUnlocked={() => setPinUnlocked(true)} />;
   }
 
   return (
@@ -216,6 +238,7 @@ export function App() {
           <button className={tab === "report" ? "active" : ""} onClick={() => setTab("report")}>Rapor</button>
         </nav>
         <div className="tabs tabs-settings">
+          <TopbarMobileButton active={mobileConnectOpen} onClick={() => setMobileConnectOpen(true)} />
           <button className={tab === "account" ? "active" : ""} onClick={() => setTab("account")}>Hesap</button>
           <button className={tab === "settings" ? "active" : ""} onClick={() => setTab("settings")}>Ayarlar</button>
         </div>
@@ -331,6 +354,7 @@ export function App() {
               onOpenSettings={() => setTab("settings")}
               onOpenLegal={setLegalOpen}
               onCompanySaved={refresh}
+              onSignedOut={() => setPinUnlocked(false)}
             />
           </motion.div>
         )}
@@ -374,11 +398,14 @@ export function App() {
           />
         </div>
         <div className="footer-right">
+          <FxRatesFooter />
           <span>Takvim</span>
           <input type="date" value={footerDate} onChange={(e) => setFooterDate(e.target.value)} />
         </div>
       </footer>
       <LegalModal open={legalOpen !== null} kind={legalOpen} onClose={() => setLegalOpen(null)} />
+      <MobileConnectModal open={mobileConnectOpen} onClose={() => setMobileConnectOpen(false)} />
+      <UpdateNoticePopup open={updateNoticeOpen} onClose={() => setUpdateNoticeOpen(false)} />
       <AssistantFloating config={assistantConfig} />
       </motion.div>
     </div>

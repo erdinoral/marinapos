@@ -1,8 +1,41 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { getMarinaApi } from "../../api/marinaClient";
 import { DashboardReport, TopSellingProduct } from "../../types/models";
 import { formatTry } from "../../utils/currency";
+import { formatQtyShort } from "../../utils/saleUnit";
+
+function TopSellingList({
+  title,
+  rows,
+  emptyText
+}: {
+  title: string;
+  rows: TopSellingProduct[];
+  emptyText: string;
+}) {
+  return (
+    <div className="report-top-subgroup">
+      <h4 className="report-top-subgroup-title">{title}</h4>
+      {rows.length > 0 ? (
+        <div className="report-top-list report-top-list-big">
+          {rows.map((p, idx) => (
+            <div key={p.productId} className="report-top-row">
+              <span>
+                {idx + 1}. {p.productName}
+              </span>
+              <small>{p.productCode || "-"}</small>
+              <small>{formatQtyShort(p.qty, p.saleUnit ?? "piece")}</small>
+              <strong>{formatTry(p.revenueKurus)}</strong>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="report-empty">{emptyText}</p>
+      )}
+    </div>
+  );
+}
 
 export function ReportScreen() {
   const [dashboard, setDashboard] = useState<DashboardReport | null>(null);
@@ -22,6 +55,16 @@ export function ReportScreen() {
     };
     void loadReport();
   }, []);
+
+  const { pieceRows, gramRows } = useMemo(() => {
+    const piece = topSelling
+      .filter((p) => (p.saleUnit ?? "piece") !== "gram")
+      .sort((a, b) => b.revenueKurus - a.revenueKurus || b.qty - a.qty);
+    const gram = topSelling
+      .filter((p) => p.saleUnit === "gram")
+      .sort((a, b) => b.revenueKurus - a.revenueKurus || b.qty - a.qty);
+    return { pieceRows: piece, gramRows: gram };
+  }, [topSelling]);
 
   return (
     <motion.div className="report-screen" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
@@ -67,15 +110,11 @@ export function ReportScreen() {
 
       <section className="report-top-section">
         <h3>En Cok Satilanlar (Genel)</h3>
+        <p className="closure-help small">Adetli ve gramajli urunler ayri listelenir; ciroya gore siralanir.</p>
         {topSelling.length > 0 ? (
-          <div className="report-top-list report-top-list-big">
-            {topSelling.map((p, idx) => (
-              <div key={p.productId} className="report-top-row">
-                <span>{idx + 1}. {p.productName}</span>
-                <small>{p.productCode || "-"}</small>
-                <strong>{p.qty.toFixed(2)} satildi</strong>
-              </div>
-            ))}
+          <div className="report-top-stack">
+            <TopSellingList title="Adetli" rows={pieceRows} emptyText="Adetli satis yok." />
+            <TopSellingList title="Gramajli" rows={gramRows} emptyText="Gramajli satis yok." />
           </div>
         ) : (
           <p className="report-empty">Henuz satis yok.</p>

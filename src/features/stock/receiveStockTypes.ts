@@ -4,7 +4,7 @@ export type ReceiveStockPrefill = {
   incomingCostTl?: string;
   costMode?: StockCostMode;
   invoicePaidTl?: string;
-  remainingDebtTl?: string;
+  linePaidTl?: string;
   supplierId?: number;
 };
 
@@ -18,7 +18,7 @@ export type ReceiveCartLine = {
   costMode: StockCostMode;
   incomingCostTl: string;
   invoicePaidTl: string;
-  remainingDebtTl: string;
+  linePaidTl: string;
   supplierId: number;
 };
 

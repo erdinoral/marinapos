@@ -1,5 +1,6 @@
 import type { Category, CategorySaleUnit, Product } from "../types/models";
-import { formatTl, kurusToTl, tlToKurus } from "./currency";
+import { formatTl, kurusToTl, parseTrAmount, tlToKurus } from "./currency";
+import { effectiveProductPriceKurus } from "./usdPricing";
 
 export function normalizeCategorySaleUnit(u: unknown): CategorySaleUnit {
   return u === "gram" ? "gram" : "piece";
@@ -201,13 +202,14 @@ export function inventoryCostKurus(
 
 /** Stok satilirsa tahmini ciro: adet × net birim; gram = (gram/1000) × 1000g net fiyat */
 export function inventoryRevenueKurus(
-  product: Pick<Product, "stockQty" | "priceKurus" | "discountPercent">,
+  product: Pick<Product, "stockQty" | "priceKurus" | "discountPercent" | "pricedInUsd" | "priceUsdCents">,
   unit: CategorySaleUnit
 ): number {
   const qty = unit === "gram" ? normalizeGramStockQty(product.stockQty) : Math.max(0, Math.round(Number(product.stockQty) || 0));
   if (qty <= 0) return 0;
   const d = Math.max(0, Math.min(100, Number(product.discountPercent ?? 0)));
-  const unitPrice = Math.round((product.priceKurus * (100 - d)) / 100);
+  const list = effectiveProductPriceKurus(product);
+  const unitPrice = Math.round((list * (100 - d)) / 100);
   if (unitPrice <= 0) return 0;
   if (unit === "gram") return gramLineTotalKurus(unitPrice, qty);
   return Math.round(qty * unitPrice);
@@ -220,7 +222,7 @@ export function inventoryRevenueKurus(
 export function incomingCostTlToUnitCostKurus(raw: string, unit: CategorySaleUnit): number | undefined | null {
   const s = String(raw ?? "").trim();
   if (s === "") return undefined;
-  const n = Number(s.replace(",", "."));
-  if (!Number.isFinite(n) || n < 0) return null;
+  const n = parseTrAmount(s);
+  if (n == null) return null;
   return unit === "gram" ? costTlPer1000gToCostPriceKurus(n) : tlToKurus(n);
 }

@@ -35,7 +35,11 @@ export function renderSupplierLikeForm(
   values: ContactFormShape,
   onPatch: (patch: Partial<ContactFormShape>) => void,
   disabled: boolean,
-  opts?: { nameLabel?: string; balanceLabel?: string; autoFocus?: boolean }
+  opts?: {
+    nameLabel?: string;
+    balanceLabel?: string;
+    autoFocus?: boolean;
+  }
 ) {
   const nameLabel = opts?.nameLabel ?? "Ad *";
   const balanceLabel = opts?.balanceLabel ?? "Acik borc (TL)";

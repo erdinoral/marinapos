@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { getMarinaApi } from "../../api/marinaClient";
 import type { Category, CategorySaleUnit, Product, Supplier, SupplierInput } from "../../types/models";
 import { formatTry, parseTrAmount, tlToKurus } from "../../utils/currency";
+import { balanceTlToKurus, confirmDebtBalanceEdit } from "../../utils/confirmDebtBalanceEdit";
 import { totalSupplierDebtKurus } from "../../utils/supplierDebt";
 import {
   categorySaleUnitOf,
@@ -12,6 +13,43 @@ import {
   tlPer1000gToKurusPerGram,
   wholesalePricePlaceholder
 } from "../../utils/saleUnit";
+
+const CATEGORY_LETTER_JUMP = [
+  "A",
+  "B",
+  "C",
+  "Ç",
+  "D",
+  "E",
+  "F",
+  "G",
+  "Ğ",
+  "H",
+  "I",
+  "İ",
+  "J",
+  "K",
+  "L",
+  "M",
+  "N",
+  "O",
+  "Ö",
+  "P",
+  "R",
+  "S",
+  "Ş",
+  "T",
+  "U",
+  "Ü",
+  "V",
+  "Y",
+  "Z"
+] as const;
+
+function categoryInitialLetter(name: string): string {
+  const ch = name.trim().charAt(0).toLocaleUpperCase("tr");
+  return ch || "";
+}
 
 interface Props {
   categories: Category[];
@@ -73,6 +111,7 @@ const emptySupplierExtra = {
 
 export function CategoryForm({ categories, suppliers, products, onCreated }: Props) {
   const supplierDebtTotalKurus = totalSupplierDebtKurus(suppliers);
+  const categoryListRef = useRef<HTMLUListElement | null>(null);
   const [name, setName] = useState("");
   const [saleUnit, setSaleUnit] = useState<CategorySaleUnit>("piece");
   const [supplierName, setSupplierName] = useState("");
@@ -86,6 +125,34 @@ export function CategoryForm({ categories, suppliers, products, onCreated }: Pro
   const [supplierEdit, setSupplierEdit] = useState<Supplier | null>(null);
   const [supplierEditForm, setSupplierEditForm] = useState({ name: "", balanceTl: "", ...emptySupplierExtra });
   const [supplierEditSaving, setSupplierEditSaving] = useState(false);
+  const [jumpFlashId, setJumpFlashId] = useState<number | null>(null);
+
+  const sortedCategories = useMemo(
+    () => [...categories].sort((a, b) => a.name.localeCompare(b.name, "tr")),
+    [categories]
+  );
+
+  const lettersWithCategories = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of sortedCategories) {
+      const letter = categoryInitialLetter(c.name);
+      if (letter) set.add(letter);
+    }
+    return set;
+  }, [sortedCategories]);
+
+  const jumpToCategoryLetter = (letter: string) => {
+    const target = sortedCategories.find((c) => categoryInitialLetter(c.name) === letter);
+    if (!target) return;
+    const list = categoryListRef.current;
+    const row = list?.querySelector<HTMLElement>(`[data-category-id="${target.id}"]`);
+    if (!row || !list) return;
+    row.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    setJumpFlashId(target.id);
+    window.setTimeout(() => {
+      setJumpFlashId((prev) => (prev === target.id ? null : prev));
+    }, 900);
+  };
 
   const openCategoryEdit = (c: Category) => {
     setCategoryEdit(c);
@@ -121,6 +188,30 @@ export function CategoryForm({ categories, suppliers, products, onCreated }: Pro
     return () => window.removeEventListener("keydown", onKey);
   }, [supplierEdit, supplierEditSaving, categoryEdit, categoryEditSaving]);
 
+  const removeProductFromCategory = async (productId: number) => {
+    if (!categoryEdit) return;
+    const product = products.find((p) => p.id === productId);
+    const label = product?.name ?? "Urun";
+    if (
+      !window.confirm(
+        `"${label}" bu kategoriden kaldirilsin mi?\nUrun silinmez; kategorisiz kalir, sonra baska kategoriye atanabilir.`
+      )
+    ) {
+      return;
+    }
+    setCategoryEditSaving(true);
+    try {
+      await getMarinaApi().updateProduct(productId, { categoryId: 0 });
+      setCategoryProductRows((prev) => prev.filter((r) => r.productId !== productId));
+      setFormMessage(`"${label}" kategoriden kaldirildi.`);
+      await onCreated();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Kaldirilamadi.");
+    } finally {
+      setCategoryEditSaving(false);
+    }
+  };
+
   const submitCategoryEdit = async () => {
     if (!categoryEdit) return;
     const n = categoryEditName.trim();
@@ -135,19 +226,21 @@ export function CategoryForm({ categories, suppliers, products, onCreated }: Pro
       for (const row of categoryProductRows) {
         const pname = row.name.trim();
         if (!pname) throw new Error("Urun adi bos olamaz.");
-        const priceTl = Number(String(row.priceTl).replace(",", "."));
-        const wholesaleTl = Number(String(row.wholesaleTl).replace(",", "."));
-        const stockQty = Number(String(row.stockQty).replace(",", "."));
-        const discountPercent = Number(String(row.discountPercent).replace(",", "."));
-        if (!Number.isFinite(priceTl) || priceTl <= 0) throw new Error(`"${pname}" icin gecerli satis fiyati girin.`);
-        if (!Number.isFinite(stockQty) || stockQty < 0) throw new Error(`"${pname}" icin gecerli stok girin.`);
+        const priceTl = parseTrAmount(String(row.priceTl).trim());
+        const wholesaleTl = parseTrAmount(String(row.wholesaleTl).trim());
+        const stockQty = parseTrAmount(String(row.stockQty).trim());
+        const discountPercent = parseTrAmount(String(row.discountPercent).trim());
+        if (priceTl == null || priceTl < 0) {
+          throw new Error(`"${pname}" icin gecerli satis fiyati girin (0 TL = satis disi).`);
+        }
+        if (stockQty == null || stockQty < 0) throw new Error(`"${pname}" icin gecerli stok girin.`);
         if (unit === "gram" && !Number.isInteger(Math.round(stockQty))) {
           throw new Error(`"${pname}" icin gram stok tam sayi olmalidir.`);
         }
-        if (!Number.isFinite(discountPercent) || discountPercent < 0 || discountPercent > 100) {
+        if (discountPercent == null || discountPercent < 0 || discountPercent > 100) {
           throw new Error(`"${pname}" icin indirim % 0-100 arasi olmali.`);
         }
-        if (row.sellsWholesale && (!Number.isFinite(wholesaleTl) || wholesaleTl <= 0)) {
+        if (row.sellsWholesale && (wholesaleTl == null || wholesaleTl <= 0)) {
           throw new Error(`"${pname}" icin toptan fiyat girin veya toptan satisi kapatin.`);
         }
         const priceKurus = unit === "gram" ? tlPer1000gToKurusPerGram(priceTl) : tlToKurus(priceTl);
@@ -155,7 +248,7 @@ export function CategoryForm({ categories, suppliers, products, onCreated }: Pro
           name: pname,
           priceKurus,
           wholesalePriceKurus:
-            row.sellsWholesale && Number.isFinite(wholesaleTl) && wholesaleTl > 0
+            row.sellsWholesale && wholesaleTl != null && wholesaleTl > 0
               ? unit === "gram"
                 ? tlPer1000gToKurusPerGram(wholesaleTl)
                 : tlToKurus(wholesaleTl)
@@ -230,12 +323,13 @@ export function CategoryForm({ categories, suppliers, products, onCreated }: Pro
       window.alert("Tedarikci adi bos olamaz.");
       return;
     }
+    const nextBal = balanceTlToKurus(supplierEditForm.balanceTl);
+    if (!confirmDebtBalanceEdit(supplierEdit.balanceOwedKurus, nextBal)) return;
     setSupplierEditSaving(true);
     try {
-      const bal = parseTrAmount(supplierEditForm.balanceTl.trim());
       await getMarinaApi().updateSupplier(supplierEdit.id, {
         name: n,
-        balanceOwedKurus: bal != null && bal >= 0 ? tlToKurus(bal) : 0,
+        balanceOwedKurus: nextBal,
         note: supplierEditForm.note.trim(),
         phone: supplierEditForm.phone.trim(),
         email: supplierEditForm.email.trim(),
@@ -282,11 +376,31 @@ export function CategoryForm({ categories, suppliers, products, onCreated }: Pro
       </button>
       {formMessage && <p className="form-message">{formMessage}</p>}
       <h3 className="category-list-title">Mevcut kategoriler</h3>
-      <ul className="category-list">
-        {categories.map((c) => (
+      {sortedCategories.length > 0 ? (
+        <div className="category-letter-jump" role="navigation" aria-label="Harfe gore kategoriye git">
+          {CATEGORY_LETTER_JUMP.map((letter) => {
+            const has = lettersWithCategories.has(letter);
+            return (
+              <button
+                key={letter}
+                type="button"
+                className={`category-letter-jump-btn${has ? "" : " is-empty"}`}
+                disabled={!has}
+                title={has ? `${letter} ile baslayan kategoriye git` : `${letter} ile baslayan kategori yok`}
+                onClick={() => jumpToCategoryLetter(letter)}
+              >
+                {letter}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+      <ul className="category-list" ref={categoryListRef}>
+        {sortedCategories.map((c) => (
           <li
             key={c.id}
-            className="category-list-row-edit"
+            data-category-id={c.id}
+            className={`category-list-row-edit${jumpFlashId === c.id ? " is-jump-flash" : ""}`}
             title="Sag tik veya Duzenle: kategori ve urunleri guncelle"
             onContextMenu={(e) => {
               e.preventDefault();
@@ -312,7 +426,9 @@ export function CategoryForm({ categories, suppliers, products, onCreated }: Pro
                     setFormMessage("Kategori silindi.");
                     await onCreated();
                   } catch (error) {
-                    setFormMessage(error instanceof Error ? error.message : "Silinemedi.");
+                    const msg = error instanceof Error ? error.message : "Silinemedi.";
+                    setFormMessage(msg);
+                    window.alert(msg);
                   }
                 })();
               }}
@@ -321,7 +437,7 @@ export function CategoryForm({ categories, suppliers, products, onCreated }: Pro
             </button>
           </li>
         ))}
-        {categories.length === 0 && <li className="category-list-empty">Henuz kategori yok.</li>}
+        {sortedCategories.length === 0 && <li className="category-list-empty">Henuz kategori yok.</li>}
       </ul>
       <h3 className="category-list-title">Tedarikci Ekle</h3>
       <p className="category-form-hint small">
@@ -492,6 +608,7 @@ export function CategoryForm({ categories, suppliers, products, onCreated }: Pro
                       <th>{wholesalePricePlaceholder(categoryEditUnit)}</th>
                       <th>{categoryEditUnit === "gram" ? "Stok (g)" : "Stok"}</th>
                       <th>Ind. %</th>
+                      <th className="category-edit-remove-col" />
                     </tr>
                   </thead>
                   <tbody>
@@ -575,6 +692,17 @@ export function CategoryForm({ categories, suppliers, products, onCreated }: Pro
                               )
                             }
                           />
+                        </td>
+                        <td className="category-edit-remove-col">
+                          <button
+                            type="button"
+                            className="category-edit-remove-btn"
+                            disabled={categoryEditSaving}
+                            title="Kategoriden kaldir (urun silinmez)"
+                            onClick={() => void removeProductFromCategory(row.productId)}
+                          >
+                            Kaldir
+                          </button>
                         </td>
                       </tr>
                     ))}

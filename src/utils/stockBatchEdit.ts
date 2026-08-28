@@ -25,6 +25,11 @@ export function stockEntryRowToCartLine(row: StockEntryLogRow): ReceiveCartLine 
   } else if (row.invoicePaidKurus != null && row.invoicePaidKurus > 0) {
     invoicePaidTl = (row.invoicePaidKurus / 100).toFixed(2);
   }
+  const lineCostKurus = stockEntryDisplayAmountKurus(row);
+  const debtKurus = row.debtAddedKurus ?? 0;
+  const paidKurus = row.amountPaidKurus ?? Math.max(0, lineCostKurus - debtKurus);
+  const linePaidTl =
+    debtKurus > 0 || (paidKurus > 0 && paidKurus < lineCostKurus) ? (paidKurus / 100).toFixed(2) : "";
   return {
     id: newCartLineId(),
     productId: row.productId,
@@ -35,7 +40,7 @@ export function stockEntryRowToCartLine(row: StockEntryLogRow): ReceiveCartLine 
     costMode,
     incomingCostTl,
     invoicePaidTl,
-    remainingDebtTl: row.debtAddedKurus != null && row.debtAddedKurus > 0 ? (row.debtAddedKurus / 100).toFixed(2) : "",
+    linePaidTl,
     supplierId: row.supplierId ?? 0
   };
 }

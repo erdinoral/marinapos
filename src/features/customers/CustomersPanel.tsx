@@ -29,6 +29,7 @@ import { invoiceInfoFromCustomer } from "../../utils/invoiceFromCustomer";
 import { canCreateInvoiceForSale } from "../../utils/invoiceFromSale";
 import { computeInventoryTotals } from "../../utils/inventoryTotals";
 import { formatTry, parseTrAmount, tlToKurus } from "../../utils/currency";
+import { applyDebtBalanceBlur, balanceTlToKurus, confirmDebtBalanceEdit } from "../../utils/confirmDebtBalanceEdit";
 import { customerAddKindLabel, customerKindLabel, customerKindShort } from "../../utils/customerLabels";
 import {
   type ContactFormShape,
@@ -313,13 +314,23 @@ export function CustomersPanel({
     const api = getMarinaApi();
     if (typeof api.listStockCostLayers !== "function") return;
     void api.listStockCostLayers().then(setCostLayers).catch(() => setCostLayers([]));
-  }, []);
+  }, [products]);
+
+  const supplierInventorySignal = products
+    .map(
+      (p) =>
+        `${p.id}:${p.stockQty}:${p.priceKurus}:${p.discountPercent ?? 0}:${p.costPriceKurus ?? 0}`
+    )
+    .join("|");
+  const supplierCostLayerSignal = costLayers
+    .map((l) => `${l.id}:${l.productId}:${l.qtyRemaining}:${l.unitCostKurus}`)
+    .join("|");
 
   const supplierInventoryTotals = useMemo(() => {
     if (!selectedSupplier) return null;
     const supplierProducts = products.filter((p) => p.isActive === 1 && productHasSupplier(p, selectedSupplier.id));
     return computeInventoryTotals(supplierProducts, categories, costLayers);
-  }, [selectedSupplier, products, categories, costLayers]);
+  }, [selectedSupplier, products, categories, costLayers, supplierInventorySignal, supplierCostLayerSignal]);
 
   useEffect(() => {
     if (!selectedCustomer || detailTab !== "history") {
@@ -497,8 +508,8 @@ export function CustomersPanel({
       window.alert("Ad gerekli.");
       return;
     }
-    const bal = Number(String(addForm.balanceTl).replace(",", "."));
-    const disc = Number(String(addForm.discountPct).replace(",", "."));
+    const bal = parseTrAmount(String(addForm.balanceTl).trim());
+    const disc = parseTrAmount(String(addForm.discountPct).trim());
     const created = await getMarinaApi().createCustomer({
       kind,
       name,
@@ -510,8 +521,8 @@ export function CustomersPanel({
       city: addForm.city.trim(),
       taxOrVkn: addForm.taxOrVkn.trim(),
       note: addForm.note.trim(),
-      balanceOwedKurus: Number.isFinite(bal) && bal >= 0 ? tlToKurus(bal) : 0,
-      suggestedDiscountPercent: Number.isFinite(disc) ? Math.max(0, Math.min(100, disc)) : 0
+      balanceOwedKurus: bal != null && bal >= 0 ? tlToKurus(bal) : 0,
+      suggestedDiscountPercent: disc != null ? Math.max(0, Math.min(100, disc)) : 0
     });
     setAddOpen(false);
     resetAddForm();
@@ -572,11 +583,12 @@ export function CustomersPanel({
 
   const submitEditCustomer = async () => {
     if (!editCustomer) return;
+    const nextBal = balanceTlToKurus(editForm.balanceTl);
+    if (!confirmDebtBalanceEdit(editCustomer.balanceOwedKurus, nextBal)) return;
     setEditSaving(true);
     try {
-      const bal = Number(String(editForm.balanceTl).replace(",", "."));
-      const disc = Number(String(editForm.discountPct).replace(",", "."));
-      const updated = await getMarinaApi().updateCustomer(editCustomer.id, {
+      const disc = parseTrAmount(String(editForm.discountPct).trim());
+      await getMarinaApi().updateCustomer(editCustomer.id, {
         name: editForm.name.trim(),
         phone: editForm.phone.trim(),
         email: editForm.email.trim(),
@@ -586,11 +598,13 @@ export function CustomersPanel({
         city: editForm.city.trim(),
         taxOrVkn: editForm.taxOrVkn.trim(),
         note: editForm.note.trim(),
-        balanceOwedKurus: Number.isFinite(bal) && bal >= 0 ? tlToKurus(bal) : 0,
-        suggestedDiscountPercent: Number.isFinite(disc) ? Math.max(0, Math.min(100, disc)) : 0
+        balanceOwedKurus: nextBal,
+        suggestedDiscountPercent: disc != null ? Math.max(0, Math.min(100, disc)) : 0
       });
       setEditCustomer(null);
       onCustomersChange?.();
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : "Musteri guncellenemedi.");
     } finally {
       setEditSaving(false);
     }
@@ -879,13 +893,18 @@ export function CustomersPanel({
                 <label className="customer-field">
                   <span>Borc (TL)</span>
                   <input
-                    key={`b-${selectedCustomer.id}`}
+                    key={`b-${selectedCustomer.id}-${selectedCustomer.balanceOwedKurus}`}
                     type="text"
                     inputMode="decimal"
                     defaultValue={selectedCustomer.balanceOwedKurus > 0 ? String(selectedCustomer.balanceOwedKurus / 100) : ""}
                     onBlur={(e) => {
-                      const n = Number(String(e.target.value).replace(",", "."));
-                      void patchCustomer({ balanceOwedKurus: Number.isFinite(n) && n >= 0 ? tlToKurus(n) : 0 });
+                      const input = e.currentTarget;
+                      const prev = selectedCustomer.balanceOwedKurus;
+                      window.setTimeout(() => {
+                        applyDebtBalanceBlur(input, prev, (nextKurus) => {
+                          void patchCustomer({ balanceOwedKurus: nextKurus });
+                        });
+                      }, 0);
                     }}
                   />
                 </label>
@@ -1069,6 +1088,77 @@ export function CustomersPanel({
 
           {detailTab === "history" && selectedCustomer && (
             <div className="customer-history-panel">
+              <h4>Son islemler</h4>
+              {detailSalesLoading ? <p className="muted small">Islemler yukleniyor...</p> : null}
+              <ul className="customer-recent-list">
+                {(detailSales.length > 0 ? detailSales : recentSales).map((sw) => (
+                  <li key={sw.sale.id} className="customer-recent-item">
+                    <button type="button" className="customer-recent-btn" onClick={() => onOpenSaleDetail(sw.sale.id)}>
+                      <span>
+                        #{sw.sale.id} · {formatSaleDateTime(sw.sale.createdAt)}
+                        {sw.sale.kind === "debt_payment" ? (
+                          <span className="muted small"> · Borc tahsilati</span>
+                        ) : null}
+                        {(sw.sale.debtAddedKurus ?? 0) > 0 ? (
+                          <span className="customer-debt-badge customer-debt-badge-inline">
+                            +borc {formatTry(sw.sale.debtAddedKurus!)}
+                          </span>
+                        ) : null}
+                        {sw.sale.paymentNote?.trim() ? (
+                          <span className="customer-sale-note-preview"> · {sw.sale.paymentNote.trim()}</span>
+                        ) : null}
+                      </span>
+                      <span>
+                        {formatTry(
+                          sw.sale.kind === "debt_payment" ? (sw.sale.debtPaidKurus ?? sw.sale.paidAmountKurus) : sw.sale.subtotalKurus
+                        )}
+                      </span>
+                    </button>
+                    {canCreateInvoiceForSale(sw.sale) ? (
+                      <button
+                        type="button"
+                        className="invoice-btn customer-recent-invoice-btn"
+                        onClick={() => void openInvoiceForSaleId(sw.sale.id)}
+                      >
+                        Fatura
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+              {recentSales.some((sw) => (sw.sale.debtAddedKurus ?? 0) > 0) ? (
+                <>
+                  <h4>Borc hareketleri</h4>
+                  <table className="cashflow-table customer-debt-history-table">
+                    <thead>
+                      <tr>
+                        <th>Tarih</th>
+                        <th>Satis</th>
+                        <th>Borc eklendi</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recentSales
+                        .filter((sw) => (sw.sale.debtAddedKurus ?? 0) > 0)
+                        .map((sw) => (
+                          <tr key={`debt-${sw.sale.id}`}>
+                            <td>{formatSaleDateTime(sw.sale.createdAt)}</td>
+                            <td>
+                              <button type="button" className="linkish" onClick={() => onOpenSaleDetail(sw.sale.id)}>
+                                #{sw.sale.id}
+                              </button>
+                            </td>
+                            <td>
+                              <span className="customer-debt-badge customer-debt-badge-inline">
+                                {formatTry(sw.sale.debtAddedKurus!)}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </>
+              ) : null}
               <h4>Aldigi urunler (ozet)</h4>
               {purchaseRows.length === 0 ? (
                 <p className="muted small">Henuz satis kaydi yok.</p>
@@ -1111,82 +1201,22 @@ export function CustomersPanel({
                   </tbody>
                 </table>
               )}
-              {recentSales.some((sw) => (sw.sale.debtAddedKurus ?? 0) > 0) ? (
-                <>
-                  <h4>Borc hareketleri</h4>
-                  <table className="cashflow-table customer-debt-history-table">
-                    <thead>
-                      <tr>
-                        <th>Tarih</th>
-                        <th>Satis</th>
-                        <th>Borc eklendi</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {recentSales
-                        .filter((sw) => (sw.sale.debtAddedKurus ?? 0) > 0)
-                        .map((sw) => (
-                          <tr key={`debt-${sw.sale.id}`}>
-                            <td>{formatSaleDateTime(sw.sale.createdAt)}</td>
-                            <td>
-                              <button type="button" className="linkish" onClick={() => onOpenSaleDetail(sw.sale.id)}>
-                                #{sw.sale.id}
-                              </button>
-                            </td>
-                            <td>
-                              <span className="customer-debt-badge customer-debt-badge-inline">
-                                {formatTry(sw.sale.debtAddedKurus!)}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                    </tbody>
-                  </table>
-                </>
-              ) : null}
-              <h4>Son islemler</h4>
-              {detailSalesLoading ? <p className="muted small">Islemler yukleniyor...</p> : null}
-              <ul className="customer-recent-list">
-                {(detailSales.length > 0 ? detailSales : recentSales).map((sw) => (
-                  <li key={sw.sale.id} className="customer-recent-item">
-                    <button type="button" className="customer-recent-btn" onClick={() => onOpenSaleDetail(sw.sale.id)}>
-                      <span>
-                        #{sw.sale.id} · {formatSaleDateTime(sw.sale.createdAt)}
-                        {sw.sale.kind === "debt_payment" ? (
-                          <span className="muted small"> · Borc tahsilati</span>
-                        ) : null}
-                        {(sw.sale.debtAddedKurus ?? 0) > 0 ? (
-                          <span className="customer-debt-badge customer-debt-badge-inline">
-                            +borc {formatTry(sw.sale.debtAddedKurus!)}
-                          </span>
-                        ) : null}
-                        {sw.sale.paymentNote?.trim() ? (
-                          <span className="customer-sale-note-preview"> · {sw.sale.paymentNote.trim()}</span>
-                        ) : null}
-                      </span>
-                      <span>
-                        {formatTry(
-                          sw.sale.kind === "debt_payment" ? (sw.sale.debtPaidKurus ?? sw.sale.paidAmountKurus) : sw.sale.subtotalKurus
-                        )}
-                      </span>
-                    </button>
-                    {canCreateInvoiceForSale(sw.sale) ? (
-                      <button
-                        type="button"
-                        className="invoice-btn customer-recent-invoice-btn"
-                        onClick={() => void openInvoiceForSaleId(sw.sale.id)}
-                      >
-                        Fatura
-                      </button>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
             </div>
           )}
 
           {detailTab === "history" && selectedSupplier && supplierOverview && (
             <div className="customer-history-panel">
+              <h4>Stok giris gecmisi</h4>
+              <p className="muted small">
+                Tek fatura / sepet kayitlari gruplanir; satira tiklayarak kalemleri gorun.
+              </p>
+              <SupplierStockBatchHistory
+                entries={supplierOverview.stockEntries.slice(0, 100)}
+                formatTime={formatSaleDateTime}
+                unitCostLabel={stockEntryUnitCostLabel}
+                canEditBatch={onEditStockInvoice ? canEditSupplierStockBatch : undefined}
+                onEditBatch={onEditStockInvoice ? handleEditSupplierStockBatch : undefined}
+              />
               <h4>Bu tedarikciden urunler ({supplierOverview.products.length})</h4>
               {supplierOverview.products.length === 0 ? (
                 <p className="muted small">Urun kartinda bu tedarikci secilmemis.</p>
@@ -1217,17 +1247,6 @@ export function CustomersPanel({
                   ariaLabel="Tedarikci stok ozeti"
                 />
               ) : null}
-              <h4>Stok giris gecmisi</h4>
-              <p className="muted small">
-                Tek fatura / sepet kayitlari gruplanir; satira tiklayarak kalemleri gorun.
-              </p>
-              <SupplierStockBatchHistory
-                entries={supplierOverview.stockEntries.slice(0, 100)}
-                formatTime={formatSaleDateTime}
-                unitCostLabel={stockEntryUnitCostLabel}
-                canEditBatch={onEditStockInvoice ? canEditSupplierStockBatch : undefined}
-                onEditBatch={onEditStockInvoice ? handleEditSupplierStockBatch : undefined}
-              />
             </div>
           )}
         </div>
@@ -1457,6 +1476,17 @@ export function CustomersPanel({
                   <input value={editForm.name} onChange={(e) => setEditForm((p) => ({ ...p, name: e.target.value }))} disabled={editSaving} />
                 </label>
                 <label className="settings-field">
+                  <span>Acik borc (TL)</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={editForm.balanceTl}
+                    onChange={(e) => setEditForm((p) => ({ ...p, balanceTl: e.target.value }))}
+                    disabled={editSaving}
+                    placeholder="0"
+                  />
+                </label>
+                <label className="settings-field">
                   <span>Telefon</span>
                   <input value={editForm.phone} onChange={(e) => setEditForm((p) => ({ ...p, phone: e.target.value }))} disabled={editSaving} />
                 </label>
@@ -1535,9 +1565,14 @@ export function CustomersPanel({
                       window.alert("Ad gerekli.");
                       return;
                     }
-                    await getMarinaApi().updateSupplier(editSupplier.id, payload);
-                    setEditSupplier(null);
-                    onSuppliersChange?.();
+                    if (!confirmDebtBalanceEdit(editSupplier.balanceOwedKurus, payload.balanceOwedKurus ?? 0)) return;
+                    try {
+                      await getMarinaApi().updateSupplier(editSupplier.id, payload);
+                      setEditSupplier(null);
+                      onSuppliersChange?.();
+                    } catch (e) {
+                      window.alert(e instanceof Error ? e.message : "Tedarikci guncellenemedi.");
+                    }
                   })();
                 }}
               >

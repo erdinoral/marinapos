@@ -11,7 +11,8 @@ export function saleToInvoiceLineItems(sw: SaleWithLines): SaleLineInput[] {
     .map((ln) => ({
       productId: ln.productId,
       qty: Math.abs(Number(ln.qty)),
-      unitPriceKurus: Math.max(0, Math.round(Number(ln.unitPriceKurus)))
+      unitPriceKurus: Math.max(0, Math.round(Number(ln.unitPriceKurus))),
+      lineTotalKurus: Math.max(0, Math.round(Number(ln.lineTotalKurus)))
     }));
 }
 

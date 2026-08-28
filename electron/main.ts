@@ -37,6 +37,9 @@ import {
   initAppUpdater,
   installAppUpdate
 } from "./appUpdateService";
+import { sharedPosCart } from "./sharedPosCart";
+import { MobileLanServer } from "./localApiServer";
+import { mobileApkQrDataUrl, mobileLanQrDataUrl } from "./mobileQr";
 
 const isDev = !app.isPackaged;
 /** Kurulu exe: yazilabilir ve guncellemelerden bagimsiz veri (genelde AppData\Roaming\...\data) */
@@ -44,6 +47,7 @@ const projectDataDir = app.isPackaged
   ? path.join(app.getPath("userData"), "data")
   : path.join(process.cwd(), "data");
 const database = new DatabaseService(projectDataDir, app.getPath("userData"));
+const mobileLan = new MobileLanServer(database, projectDataDir, app.getVersion());
 const errorLogs = new ErrorLogService(projectDataDir);
 const closureService = new ClosureService(database, (result) => {
   console.log(`Kapanis tamamlandi: ${result.reportPath}`);
@@ -92,15 +96,26 @@ function createWindow() {
     }
   });
 
-  if (isDev) {
-    win.loadURL("http://localhost:5173");
-  } else {
+  if (app.isPackaged) {
     win.loadFile(path.join(app.getAppPath(), "dist", "index.html"));
+    return;
+  }
+
+  const distIndex = path.join(process.cwd(), "dist", "index.html");
+  const viteDevUrl = process.env.MARINA_VITE_DEV_URL ?? "http://localhost:5173";
+  /** npm run dev: Vite ayakta → localhost. npm start: dist varsa dosyadan ac. */
+  if (process.env.MARINA_VITE_DEV === "1") {
+    win.loadURL(viteDevUrl);
+  } else if (fs.existsSync(distIndex)) {
+    win.loadFile(distIndex);
+  } else {
+    win.loadURL(viteDevUrl);
   }
 }
 
 app.whenReady().then(() => {
   database.init();
+  mobileLan.init();
   try {
     const caught = closureService.catchUpMissingClosuresBeforeToday();
     if (caught.length > 0) {
@@ -118,6 +133,31 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
   }
+});
+
+app.on("before-quit", () => {
+  mobileLan.shutdown();
+});
+
+ipcMain.handle("mobile:get-status", () => mobileLan.getStatus());
+ipcMain.handle("mobile:set-enabled", (_, enabled: boolean) => mobileLan.setEnabled(Boolean(enabled)));
+ipcMain.handle("mobile:regenerate-token", () => mobileLan.regenerateToken());
+ipcMain.handle("mobile:get-pair-payload", () => mobileLan.getPairPayload());
+ipcMain.handle("mobile:get-qr-dataurl", () => mobileLanQrDataUrl(mobileLan));
+ipcMain.handle("mobile:get-apk-qr-dataurl", () => mobileApkQrDataUrl(mobileLan));
+
+ipcMain.handle("pos-cart:pull", () => sharedPosCart.getSnapshot());
+ipcMain.handle("pos-cart:push", (_, payload: { activeCartId: number; lines: import("../src/types/sharedPosCart").SharedPosCartLineDto[] }) => {
+  sharedPosCart.pushFromPc(Number(payload.activeCartId) || 1, Array.isArray(payload.lines) ? payload.lines : []);
+  return sharedPosCart.getSnapshot();
+});
+ipcMain.handle("pos-cart:ack-ops", (_, opIds: string[]) => {
+  sharedPosCart.ackOps(Array.isArray(opIds) ? opIds.map(String) : []);
+  return sharedPosCart.getSnapshot();
+});
+ipcMain.handle("pos-cart:clear", () => {
+  sharedPosCart.clear();
+  return sharedPosCart.getSnapshot();
 });
 
 ipcMain.handle("license:check", async () => checkAndPersistLicense(database.settings));
@@ -282,15 +322,26 @@ ipcMain.handle(
     kind: SaleKind = "sale",
     cartName = "Sepet 1",
     customerId: number | null | undefined = undefined,
-    extraFeeKurus?: number
-  ) => database.sales.create(items, paymentType, paidAmount, kind, cartName, customerId, Number(extraFeeKurus) || 0)
+    extraFeeKurus?: number,
+    paymentSplit?: { cashAmountKurus: number; cardAmountKurus: number } | null
+  ) =>
+    database.sales.create(
+      items,
+      paymentType,
+      paidAmount,
+      kind,
+      cartName,
+      customerId,
+      Number(extraFeeKurus) || 0,
+      paymentSplit ?? null
+    )
 );
 ipcMain.handle(
   "sales:record-debt-payment",
   (_, customerId: number, paymentType: PaymentType, amountKurus?: number | null, paymentNote?: string | null) =>
     database.sales.recordDebtPayment(
       Number(customerId),
-      paymentType,
+      paymentType === "card" ? "card" : "cash",
       amountKurus != null && Number.isFinite(Number(amountKurus)) ? Number(amountKurus) : undefined,
       paymentNote != null ? String(paymentNote) : undefined
     )
@@ -324,7 +375,7 @@ ipcMain.handle(
   (_, supplierId: number, paymentType: PaymentType, amountKurus?: number | null, paymentNote?: string | null) => {
     database.products.recordSupplierDebtPayment(
       Number(supplierId),
-      paymentType,
+      paymentType === "card" ? "card" : "cash",
       amountKurus != null && Number.isFinite(Number(amountKurus)) ? Number(amountKurus) : undefined,
       paymentNote != null ? String(paymentNote) : undefined
     );
@@ -422,6 +473,104 @@ ipcMain.handle("shell:open-external", (_, url: string) => {
     void shell.openExternal(u);
   }
 });
+
+/**
+ * Barkod etiket yazdirma.
+ * webContents.print bazi Windows kurulumlarinda callback vermeden asiliyor;
+ * bu yuzden tarayici window.print() kullanilir.
+ */
+ipcMain.handle(
+  "print:html",
+  async (
+    _,
+    html: string,
+    opts?: { widthMm?: number; heightMm?: number; title?: string }
+  ): Promise<{ ok: true } | { ok: false; error: string }> => {
+    const body = String(html ?? "");
+    if (!body.trim()) return { ok: false, error: "Yazdirilacak icerik bos." };
+
+    const widthMm = Math.max(10, Number(opts?.widthMm) || 60);
+    const heightMm = Math.max(10, Number(opts?.heightMm) || 40);
+    const title = String(opts?.title ?? "Etiket").replace(/[^\w\s\-.]/g, "").slice(0, 40) || "Etiket";
+    const tmpPath = path.join(app.getPath("temp"), `marina-print-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.html`);
+
+    try {
+      fs.writeFileSync(tmpPath, body, "utf8");
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : "Gecici dosya yazilamadi." };
+    }
+
+    const printWin = new BrowserWindow({
+      show: true,
+      width: Math.max(420, Math.round(widthMm * 6)),
+      height: Math.max(300, Math.round(heightMm * 6)),
+      x: 60,
+      y: 60,
+      backgroundColor: "#ffffff",
+      autoHideMenuBar: true,
+      webPreferences: {
+        sandbox: true,
+        contextIsolation: true,
+        nodeIntegration: false
+      }
+    });
+    printWin.setMenuBarVisibility(false);
+    printWin.setTitle(title);
+
+    try {
+      await printWin.loadFile(tmpPath);
+      await new Promise<void>((resolve) => {
+        if (printWin.webContents.isLoading()) {
+          printWin.webContents.once("did-finish-load", () => resolve());
+        } else {
+          resolve();
+        }
+      });
+      await new Promise((r) => setTimeout(r, 200));
+      if (!printWin.isDestroyed()) {
+        printWin.show();
+        printWin.focus();
+        printWin.moveTop();
+      }
+
+      // window.print — diyalog kapanana (afterprint) kadar bekle; erken destroy diyaloğu öldürür
+      const outcome = await Promise.race([
+        printWin.webContents.executeJavaScript(
+          `new Promise((resolve) => {
+            let done = false;
+            const finish = (v) => { if (done) return; done = true; resolve(v); };
+            window.addEventListener("afterprint", () => finish("ok"), { once: true });
+            try { window.focus(); window.print(); } catch (e) { finish("err:" + String(e)); }
+          })`,
+          true
+        ) as Promise<string>,
+        new Promise<string>((resolve) => setTimeout(() => resolve("timeout"), 180000))
+      ]);
+
+      if (typeof outcome === "string" && outcome.startsWith("err:")) {
+        return { ok: false, error: outcome.slice(4) || "Yazdirma hatasi." };
+      }
+      if (outcome === "timeout") {
+        return { ok: false, error: "Yazici penceresi zaman asimina ugradi." };
+      }
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    } finally {
+      await new Promise((r) => setTimeout(r, 500));
+      try {
+        if (!printWin.isDestroyed()) printWin.destroy();
+      } catch {
+        /* ignore */
+      }
+      try {
+        fs.unlinkSync(tmpPath);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+);
 ipcMain.handle("export:xlsx", (_, date: string) => exportSalesToXlsx(database, date, app.getPath("documents")));
 ipcMain.handle("export:monthly-profit", (_, yearMonth: string) =>
   exportMonthlyProfitToXlsx(database, yearMonth, app.getPath("documents"))

@@ -3,7 +3,9 @@ import { motion } from "framer-motion";
 import { getMarinaApi } from "../../api/marinaClient";
 import { ClosureRunResult, DayProfitDetail, SaleRecord, Settings } from "../../types/models";
 import { formatTry } from "../../utils/currency";
-import { saleCollectedKurus } from "../../utils/saleCollected";
+import { saleCashCardCollectedKurus, salePaymentLabel } from "../../utils/paymentLabel";
+import { saleCollectedKurus, saleKindListLabel } from "../../utils/saleCollected";
+import { formatSaleTime } from "../../utils/saleFormat";
 import { formatQtyShort } from "../../utils/saleUnit";
 
 interface Props {
@@ -38,12 +40,30 @@ export function ClosureScreen({ settings }: Props) {
     let cash = 0;
     let card = 0;
     for (const s of todaySales) {
-      const collected = saleCollectedKurus(s);
-      if (s.paymentType === "cash") cash += collected;
-      else card += collected;
+      const parts = saleCashCardCollectedKurus(s);
+      cash += parts.cashKurus;
+      card += parts.cardKurus;
     }
     return { cash, card, total: cash + card };
   }, [todaySales]);
+
+  const recentSales = useMemo(
+    () =>
+      [...todaySales].sort(
+        (a, b) => b.createdAt.localeCompare(a.createdAt) || b.id - a.id
+      ),
+    [todaySales]
+  );
+
+  const soldProductLines = useMemo(
+    () =>
+      dayProfit
+        ? [...dayProfit.lines].sort(
+            (a, b) => b.saleCreatedAt.localeCompare(a.saleCreatedAt) || b.saleId - a.saleId
+          )
+        : [],
+    [dayProfit]
+  );
 
   const run = async () => {
     setLoading(true);
@@ -111,7 +131,30 @@ export function ClosureScreen({ settings }: Props) {
               <span>{dayProfit.lines.length}</span>
             </div>
           </div>
-          {dayProfit.lines.length > 0 && (
+
+          <h4 className="closure-section-title">Son satislar ({recentSales.length})</h4>
+          {recentSales.length === 0 ? (
+            <p className="closure-help small">Bugun henuz islem yok.</p>
+          ) : (
+            <div className="closure-sales-list">
+              {recentSales.map((sale) => (
+                <div key={sale.id} className="closure-sales-row">
+                  <span className="closure-sales-main">
+                    #{sale.id} · {formatSaleTime(sale.createdAt)} · {sale.cartName || "Sepet"}
+                  </span>
+                  <span className="closure-sales-meta">
+                    {saleKindListLabel(sale.kind)} · {salePaymentLabel(sale.paymentType)}
+                  </span>
+                  <span className="sales-amount">{formatTry(saleCollectedKurus(sale))}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <h4 className="closure-section-title">Satilan urunler ({soldProductLines.length})</h4>
+          {soldProductLines.length === 0 ? (
+            <p className="closure-help small">Satilan urun satiri yok.</p>
+          ) : (
             <div className="closure-lines-wrap">
               <table className="closure-lines-table">
                 <thead>
@@ -127,7 +170,7 @@ export function ClosureScreen({ settings }: Props) {
                   </tr>
                 </thead>
                 <tbody>
-                  {dayProfit.lines.map((r) => (
+                  {soldProductLines.map((r) => (
                     <tr key={r.saleItemId}>
                       <td>{r.saleCreatedAt.slice(11, 19)}</td>
                       <td>

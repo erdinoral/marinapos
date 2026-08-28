@@ -2,6 +2,7 @@ import type { Category, Customer, Product, SaleWithLines } from "../../types/mod
 import { formatTry } from "../../utils/currency";
 import { canCreateInvoiceForSale } from "../../utils/invoiceFromSale";
 import { saleCollectedKurus, saleKindListLabel } from "../../utils/saleCollected";
+import { salePaymentLabel } from "../../utils/paymentLabel";
 import { formatSaleDateTime } from "../../utils/saleFormat";
 import { formatQtyShort } from "../../utils/saleUnit";
 import { formatPosUnitPrice } from "../pos/posCartLine";
@@ -45,8 +46,11 @@ export function SaleDetailDialog({
           </button>
         </div>
         <p className="sale-detail-meta">
-          {formatSaleDateTime(detail.sale.createdAt)} · {detail.sale.paymentType === "cash" ? "Nakit" : "Kart"} · Sepet:{" "}
-          {detail.sale.cartName || "Sepet 1"}
+          {formatSaleDateTime(detail.sale.createdAt)} · {salePaymentLabel(detail.sale.paymentType)}
+          {detail.sale.paymentType === "mixed"
+            ? ` (${formatTry(detail.sale.cashAmountKurus ?? 0)} nakit + ${formatTry(detail.sale.cardAmountKurus ?? 0)} kart)`
+            : null}{" "}
+          · Sepet: {detail.sale.cartName || "Sepet 1"}
           {customerName ? <> · Musteri: {customerName}</> : null}
         </p>
         {detail.sale.kind === "debt_payment" ? (
@@ -100,6 +104,16 @@ export function SaleDetailDialog({
           {(detail.sale.debtPaidKurus ?? 0) > 0 && detail.sale.kind === "sale" ? (
             <span className="sale-detail-debt"> · Borca odeme: {formatTry(detail.sale.debtPaidKurus!)}</span>
           ) : null}
+          {detail.sale.kind === "sale" && detail.sale.paymentType === "mixed" ? (
+            <>
+              {" "}
+              · Nakit: {formatTry(detail.sale.cashAmountKurus ?? 0)} · Kart: {formatTry(detail.sale.cardAmountKurus ?? 0)}
+              {(detail.sale.debtAddedKurus ?? 0) > 0 ? (
+                <span className="sale-detail-debt"> · Borc eklendi: {formatTry(detail.sale.debtAddedKurus!)}</span>
+              ) : null}
+              {detail.sale.changeAmountKurus > 0 ? <> · Para ustu: {formatTry(detail.sale.changeAmountKurus)}</> : null}
+            </>
+          ) : null}
           {detail.sale.kind === "sale" && detail.sale.paymentType === "cash" ? (
             <>
               {" "}
@@ -108,6 +122,15 @@ export function SaleDetailDialog({
                 <span className="sale-detail-debt"> · Borc eklendi: {formatTry(detail.sale.debtAddedKurus!)}</span>
               ) : null}
               {detail.sale.changeAmountKurus > 0 ? <> · Para ustu: {formatTry(detail.sale.changeAmountKurus)}</> : null}
+            </>
+          ) : null}
+          {detail.sale.kind === "sale" && detail.sale.paymentType === "card" ? (
+            <>
+              {" "}
+              · Karttan: {formatTry(detail.sale.paidAmountKurus)}
+              {(detail.sale.debtAddedKurus ?? 0) > 0 ? (
+                <span className="sale-detail-debt"> · Borc eklendi: {formatTry(detail.sale.debtAddedKurus!)}</span>
+              ) : null}
             </>
           ) : null}
         </p>

@@ -55,9 +55,20 @@ contextBridge.exposeInMainWorld("marinaApi", {
     kind: SaleKind = "sale",
     cartName = "Sepet 1",
     customerId?: number | null,
-    extraFeeKurus?: number
+    extraFeeKurus?: number,
+    paymentSplit?: { cashAmountKurus: number; cardAmountKurus: number } | null
   ) =>
-    ipcRenderer.invoke("sales:create", items, paymentType, paidAmount, kind, cartName, customerId ?? null, extraFeeKurus ?? 0),
+    ipcRenderer.invoke(
+      "sales:create",
+      items,
+      paymentType,
+      paidAmount,
+      kind,
+      cartName,
+      customerId ?? null,
+      extraFeeKurus ?? 0,
+      paymentSplit ?? null
+    ),
   recordCustomerDebtPayment: (
     customerId: number,
     paymentType: PaymentType,
@@ -135,6 +146,8 @@ contextBridge.exposeInMainWorld("marinaApi", {
   openExternalUrl: (url: string) => ipcRenderer.invoke("shell:open-external", url),
   runClosure: (actualCashKurus?: number) => ipcRenderer.invoke("closures:run", actualCashKurus),
   showItemInFolder: (fullPath: string) => ipcRenderer.invoke("shell:show-item-in-folder", fullPath),
+  printHtml: (html: string, opts?: { widthMm?: number; heightMm?: number; title?: string }) =>
+    ipcRenderer.invoke("print:html", html, opts ?? {}),
   exportXlsx: (date: string) => ipcRenderer.invoke("export:xlsx", date),
   exportMonthlyProfitXlsx: (yearMonth: string) => ipcRenderer.invoke("export:monthly-profit", yearMonth),
   listTobaccoAromas: () => ipcRenderer.invoke("tobacco-aromas:list"),
@@ -170,5 +183,16 @@ contextBridge.exposeInMainWorld("marinaApi", {
     const handler = (_event: unknown, info: import("../src/types/models").AppUpdateInfo) => callback(info);
     ipcRenderer.on("app-update:state", handler);
     return () => ipcRenderer.removeListener("app-update:state", handler);
-  }
+  },
+  getMobileLanStatus: () => ipcRenderer.invoke("mobile:get-status"),
+  setMobileLanEnabled: (enabled: boolean) => ipcRenderer.invoke("mobile:set-enabled", enabled),
+  regenerateMobileLanToken: () => ipcRenderer.invoke("mobile:regenerate-token"),
+  getMobileLanPairPayload: () => ipcRenderer.invoke("mobile:get-pair-payload"),
+  getMobileLanQrDataUrl: () => ipcRenderer.invoke("mobile:get-qr-dataurl"),
+  getMobileApkQrDataUrl: () => ipcRenderer.invoke("mobile:get-apk-qr-dataurl"),
+  posCartPull: () => ipcRenderer.invoke("pos-cart:pull"),
+  posCartPush: (payload: import("../src/types/sharedPosCart").SharedPosCartPushInput) =>
+    ipcRenderer.invoke("pos-cart:push", payload),
+  posCartAckOps: (opIds: string[]) => ipcRenderer.invoke("pos-cart:ack-ops", opIds),
+  posCartClear: () => ipcRenderer.invoke("pos-cart:clear")
 });

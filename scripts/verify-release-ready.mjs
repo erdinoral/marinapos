@@ -117,25 +117,18 @@ if (!url || !anon) {
   ok("Supabase URL + anon key bulundu");
 }
 
-const appCode =
-  process.env.MARINA_LICENSE_APP_CODE ??
-  envLocal.MARINA_LICENSE_APP_CODE ??
-  license?.appCode ??
-  "marina-pos";
-if (appCode !== "marina-pos") {
-  warn(`app_code="${appCode}" — musteri kurulumu icin marina-pos kullanin (pack:release oncesi MARINA_LICENSE_APP_CODE=marina-pos)`);
+const shellAppCode = process.env.MARINA_LICENSE_APP_CODE;
+const appCode = shellAppCode ?? license?.appCode ?? "marina-pos";
+if (shellAppCode && shellAppCode !== "marina-pos") {
+  warn(`Shell app_code="${shellAppCode}" — musteri kurulumu icin bos birakin veya marina-pos verin`);
 } else {
-  ok('app_code: marina-pos');
+  ok("Release paketi app_code: marina-pos (.env.local'deki gelistirme kodu exe'ye karismaz)");
 }
 
 // GitHub CI hatirlatmalari
-console.log("\n--- CI icin hatirlatma ---");
-console.log("  Repository secrets (Environment DEGIL):");
-console.log("    NEXT_PUBLIC_SUPABASE_URL");
-console.log("    NEXT_PUBLIC_SUPABASE_ANON_KEY");
-console.log("  Settings → Actions → Workflow permissions → Read and write");
-console.log("  Manuel Run workflow: tag = guncel surum (ornek 1.8.8), v1.8.0 DEGIL");
-
+console.log("\n--- Yerel yayin (onerilen) ---");
+console.log("  $env:GH_TOKEN='github_pat_...'   # release:publish icin");
+console.log("  npm run release:publish");
 console.log("\n--- Elle GitHub Release ---");
 console.log(`  release/Marina-Nargile-POS-${pkgVersion}-Setup.exe`);
 console.log(`  release/Marina-Nargile-POS-${pkgVersion}-Setup.exe.blockmap`);

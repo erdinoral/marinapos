@@ -43,7 +43,7 @@ export const FAQ_ENTRIES: FaqEntry[] = [
     title: "Tedarikci borcu",
     keywords: ["tedarikci borc", "kalan borc", "tedarikci odeme", "mal alimi borc"],
     body:
-      "Stok eklerken odemediginiz kisim tedarikci bakiyesine yazilir (Kalan borc alani).\n\n" +
+      "Stok eklerken odemediginiz kisim tedarikci bakiyesine yazilir (Odenen tutar alanindan hesaplanir).\n\n" +
       "Gider kaydi genelde odenen tutar kadar olur. Tedarikci listesinde borclu olanlar isaretlenir."
   },
   {

@@ -17,6 +17,7 @@ import {
   TopSellingProduct
 } from "../../types/models";
 import { saleCollectedKurus } from "../../utils/saleCollected";
+import { saleCashCardCollectedKurus } from "../../utils/paymentLabel";
 import { JsonStore } from "../store";
 import { consumeFifo, restoreFifoOnReturn } from "../../utils/fifoStockCost";
 import { categorySaleUnitOf, gramLineTotalKurus, normalizeGramCartQty } from "../../utils/saleUnit";
@@ -54,6 +55,7 @@ export interface TopSellingProductRow {
   productCode: string;
   qty: number;
   revenueKurus: number;
+  saleUnit: CategorySaleUnit;
 }
 
 export interface DashboardReport {
@@ -99,7 +101,8 @@ export class SalesRepository {
     kind: SaleKind = "sale",
     cartName = "Sepet 1",
     customerId: number | null | undefined = undefined,
-    extraFeeKurus?: number
+    extraFeeKurus?: number,
+    paymentSplit?: { cashAmountKurus: number; cardAmountKurus: number } | null
   ) {
     const state = this.store.getState();
     let resolvedCustomerId: number | undefined;
@@ -122,11 +125,13 @@ export class SalesRepository {
         item.unitPriceKurus != null && Number.isFinite(item.unitPriceKurus) ? Math.round(item.unitPriceKurus) : null;
       const effectiveUnitPriceKurus =
         override != null ? Math.max(0, override) : Math.round((product.priceKurus * (100 - discount)) / 100);
-      const lineTotalKurus = isGram
-        ? item.lineTotalKurus != null && Number.isFinite(item.lineTotalKurus)
+      /* POS satir Ind.% birim fiyata degil toplama uygulanir; lineTotalKurus gonderildiyse onu kullan (adet+gram). */
+      const lineTotalKurus =
+        item.lineTotalKurus != null && Number.isFinite(item.lineTotalKurus)
           ? Math.max(0, Math.round(item.lineTotalKurus)) * sign
-          : gramLineTotalKurus(effectiveUnitPriceKurus, qty) * sign
-        : Math.round(qty * effectiveUnitPriceKurus) * sign;
+          : isGram
+            ? gramLineTotalKurus(effectiveUnitPriceKurus, qty) * sign
+            : Math.round(qty * effectiveUnitPriceKurus) * sign;
       let unitCostKurus = product.costPriceKurus ?? 0;
       let lineCostKurus = 0;
       if (kind === "sale") {
@@ -156,6 +161,8 @@ export class SalesRepository {
     let changeAmountKurus = 0;
     let debtAddedKurus = 0;
     let debtPaidKurus = 0;
+    let cashAmountKurus = 0;
+    let cardAmountKurus = 0;
 
     const applySurplusToCustomerDebt = (amountPaidKurus: number) => {
       if (!resolvedCustomerId) return;
@@ -170,6 +177,39 @@ export class SalesRepository {
 
     if (kind === "return") {
       paidAmountKurus = subtotalKurus;
+    } else if (paymentType === "mixed") {
+      cashAmountKurus = Math.max(0, Math.round(Number(paymentSplit?.cashAmountKurus) || 0));
+      cardAmountKurus = Math.max(0, Math.round(Number(paymentSplit?.cardAmountKurus) || 0));
+      if (cashAmountKurus <= 0 && cardAmountKurus <= 0) {
+        throw new Error("Karma odeme icin nakit veya kart tutari girin.");
+      }
+      const tendered = cashAmountKurus + cardAmountKurus;
+      paidAmountKurus = tendered;
+      if (tendered >= subtotalKurus) {
+        const surplus = tendered - subtotalKurus;
+        if (resolvedCustomerId && surplus > 0) {
+          const customer = state.customers.find((c) => c.id === resolvedCustomerId);
+          if (customer && customer.balanceOwedKurus > 0) {
+            const applied = Math.min(surplus, customer.balanceOwedKurus);
+            customer.balanceOwedKurus -= applied;
+            debtPaidKurus = applied;
+            changeAmountKurus = Math.min(cashAmountKurus, Math.max(0, surplus - applied));
+          } else {
+            changeAmountKurus = Math.min(cashAmountKurus, surplus);
+          }
+        } else {
+          changeAmountKurus = Math.min(cashAmountKurus, surplus);
+        }
+      } else {
+        debtAddedKurus = subtotalKurus - tendered;
+        if (debtAddedKurus > 0) {
+          if (!resolvedCustomerId) {
+            throw new Error("Eksik odeme borca yazilmasi icin musteri secilmelidir.");
+          }
+          const customer = state.customers.find((c) => c.id === resolvedCustomerId);
+          if (customer) customer.balanceOwedKurus += debtAddedKurus;
+        }
+      }
     } else if (paymentType === "card") {
       const cardPaid = roundedPaid;
       if (cardPaid >= subtotalKurus) {
@@ -230,6 +270,12 @@ export class SalesRepository {
       ...(extraRaw > 0 ? { extraFeeKurus: extraRaw } : {}),
       paidAmountKurus,
       changeAmountKurus,
+      ...(paymentType === "mixed"
+        ? {
+            cashAmountKurus,
+            cardAmountKurus
+          }
+        : {}),
       ...(debtAddedKurus > 0 ? { debtAddedKurus } : {}),
       ...(debtPaidKurus > 0 ? { debtPaidKurus } : {}),
       ...(resolvedCustomerId != null ? { customerId: resolvedCustomerId } : {})
@@ -436,9 +482,9 @@ export class SalesRepository {
     let cashTotalKurus = 0;
     let cardTotalKurus = 0;
     for (const s of sales) {
-      const collected = saleCollectedKurus(s);
-      if (s.paymentType === "cash") cashTotalKurus += collected;
-      else cardTotalKurus += collected;
+      const parts = saleCashCardCollectedKurus(s);
+      cashTotalKurus += parts.cashKurus;
+      cardTotalKurus += parts.cardKurus;
     }
     return {
       totalSalesCount: sales.length,
@@ -610,31 +656,44 @@ export class SalesRepository {
   getTopSellingProducts(limit = 8): TopSellingProductRow[] {
     const state = this.store.getState();
     const salesById = new Map(state.sales.map((s) => [s.id, s]));
+    const productById = new Map(state.products.map((p) => [p.id, p]));
     const acc = new Map<number, TopSellingProductRow>();
     for (const item of state.saleItems) {
       const sale = salesById.get(item.saleId);
       if (!sale) continue;
       const sign = sale.kind === "return" ? -1 : 1;
+      const p = productById.get(item.productId);
+      const saleUnit = categorySaleUnitOf(state.categories, p?.categoryId ?? 0);
       const row = acc.get(item.productId) ?? {
         productId: item.productId,
         productName: "(silinmis urun)",
         productCode: "",
         qty: 0,
-        revenueKurus: 0
+        revenueKurus: 0,
+        saleUnit
       };
       row.qty += item.qty * sign;
       row.revenueKurus += item.lineTotalKurus;
       acc.set(item.productId, row);
     }
-    const productById = new Map(state.products.map((p) => [p.id, p]));
-    return Array.from(acc.values())
+    const cap = Math.max(1, Math.min(100, Math.floor(Number(limit) || 8)));
+    const ranked = Array.from(acc.values())
       .map((r) => {
         const p = productById.get(r.productId);
-        return { ...r, productName: p?.name ?? r.productName, productCode: p?.code ?? r.productCode };
+        const saleUnit = categorySaleUnitOf(state.categories, p?.categoryId ?? 0);
+        return {
+          ...r,
+          productName: p?.name ?? r.productName,
+          productCode: p?.code ?? r.productCode,
+          saleUnit
+        };
       })
       .filter((r) => r.qty > 0)
-      .sort((a, b) => b.qty - a.qty || b.revenueKurus - a.revenueKurus)
-      .slice(0, limit);
+      .sort((a, b) => b.revenueKurus - a.revenueKurus || b.qty - a.qty);
+    // Her birim grubundan limit kadar — adet/gram birbirini ezmesin
+    const piece = ranked.filter((r) => r.saleUnit !== "gram").slice(0, cap);
+    const gram = ranked.filter((r) => r.saleUnit === "gram").slice(0, cap);
+    return [...piece, ...gram];
   }
 
   /** Secilen ay icin en cok satilan urunler (miktar / ciro) */
@@ -643,11 +702,14 @@ export class SalesRepository {
     const ym = yearMonth.slice(0, 7);
     const salesInMonth = state.sales.filter((s) => s.createdAt.slice(0, 7) === ym);
     const salesById = new Map(salesInMonth.map((s) => [s.id, s]));
+    const productById = new Map(state.products.map((p) => [p.id, p]));
     const acc = new Map<number, TopSellingProduct>();
     for (const item of state.saleItems) {
       const sale = salesById.get(item.saleId);
       if (!sale) continue;
       const sign = sale.kind === "return" ? -1 : 1;
+      const p = productById.get(item.productId);
+      const saleUnit = categorySaleUnitOf(state.categories, p?.categoryId ?? 0);
       const row =
         acc.get(item.productId) ??
         ({
@@ -655,22 +717,30 @@ export class SalesRepository {
           productName: "(silinmis urun)",
           productCode: "",
           qty: 0,
-          revenueKurus: 0
+          revenueKurus: 0,
+          saleUnit
         } as TopSellingProduct);
       row.qty += item.qty * sign;
       row.revenueKurus += item.lineTotalKurus;
       acc.set(item.productId, row);
     }
-    const productById = new Map(state.products.map((p) => [p.id, p]));
     const cap = Math.max(1, Math.min(50, Math.floor(Number(limit) || 20)));
-    return Array.from(acc.values())
+    const ranked = Array.from(acc.values())
       .map((r) => {
         const p = productById.get(r.productId);
-        return { ...r, productName: p?.name ?? r.productName, productCode: p?.code ?? r.productCode };
+        const saleUnit = categorySaleUnitOf(state.categories, p?.categoryId ?? 0);
+        return {
+          ...r,
+          productName: p?.name ?? r.productName,
+          productCode: p?.code ?? r.productCode,
+          saleUnit
+        };
       })
       .filter((r) => r.qty > 0)
-      .sort((a, b) => b.qty - a.qty || b.revenueKurus - a.revenueKurus)
-      .slice(0, cap);
+      .sort((a, b) => b.revenueKurus - a.revenueKurus || b.qty - a.qty);
+    const piece = ranked.filter((r) => r.saleUnit !== "gram").slice(0, cap);
+    const gram = ranked.filter((r) => r.saleUnit === "gram").slice(0, cap);
+    return [...piece, ...gram];
   }
 
   /** Ay sonu ozeti (gelir-gider haric; tam raporda cashflow ile birlestirilir) */
@@ -688,8 +758,13 @@ export class SalesRepository {
       revenueKurus += ex;
     }
     const profitKurus = revenueKurus - costKurus;
-    const cashKurus = salesInMonth.filter((s) => s.paymentType === "cash").reduce((s, x) => s + x.subtotalKurus, 0);
-    const cardKurus = salesInMonth.filter((s) => s.paymentType === "card").reduce((s, x) => s + x.subtotalKurus, 0);
+    let cashKurus = 0;
+    let cardKurus = 0;
+    for (const s of salesInMonth) {
+      const parts = saleCashCardCollectedKurus(s);
+      cashKurus += parts.cashKurus;
+      cardKurus += parts.cardKurus;
+    }
     const closures: MonthEndClosureRow[] = state.closures
       .filter((c) => c.closureDate.slice(0, 7) === ym)
       .slice()
@@ -751,8 +826,13 @@ export class SalesRepository {
     const sales = state.sales;
     const revenueKurus = state.saleItems.reduce((s, i) => s + i.lineTotalKurus, 0);
     const costKurus = state.saleItems.reduce((s, i) => s + (i.lineCostKurus ?? i.qty * (i.unitCostKurus ?? 0)), 0);
-    const cashKurus = sales.filter((s) => s.paymentType === "cash").reduce((sum, s) => sum + s.subtotalKurus, 0);
-    const cardKurus = sales.filter((s) => s.paymentType === "card").reduce((sum, s) => sum + s.subtotalKurus, 0);
+    let cashKurus = 0;
+    let cardKurus = 0;
+    for (const s of sales) {
+      const parts = saleCashCardCollectedKurus(s);
+      cashKurus += parts.cashKurus;
+      cardKurus += parts.cardKurus;
+    }
     const cartMap = new Map<string, { salesCount: number; totalKurus: number }>();
     for (const sale of sales) {
       const key = sale.cartName?.trim() || "Sepet 1";

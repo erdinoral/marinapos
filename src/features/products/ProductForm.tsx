@@ -21,6 +21,19 @@ import { lineCostKurusFromUnit } from "../../utils/stockCost";
 import { CategoryStockHint } from "./CategoryForm";
 import { ProductSuppliersField } from "./ProductSuppliersField";
 import { normalizeAlternateSupplierIds } from "../../utils/productSuppliers";
+import { formatFxTry } from "../../services/fxRates";
+import {
+  convertTlFormToUsdFields,
+  convertUsdFormToTlFields,
+  costUsdArrivalPreview,
+  getCachedUsdTry,
+  parseUsdAmount,
+  parseUsdTryRate,
+  resolveUsdTryRate,
+  usdCentsToTlKurus,
+  usdTlPreviewLabel,
+  usdToCents
+} from "../../utils/usdPricing";
 
 interface Props {
   categories: Category[];
@@ -46,6 +59,10 @@ const initialState = {
   vatRatePercent: "20",
   priceIncludesVat: false,
   domesticMade: false,
+  pricedInUsd: false,
+  priceUsd: "",
+  costUsd: "",
+  costUsdTryRate: "",
   wholesaleTl: "",
   alternateTl: "",
   posFavorite: false,
@@ -57,10 +74,25 @@ export function ProductForm({ categories, suppliers, products, onCreated }: Prop
   const [form, setForm] = useState(initialState);
   const [formMessage, setFormMessage] = useState("");
   const [mediaDir, setMediaDir] = useState("");
+  const [usdTry, setUsdTry] = useState<number | null>(() => getCachedUsdTry());
   /** Kullanici kod alanina dokunduysa barkod blur ile kod ezilmez */
   const codeTouchedRef = useRef(false);
 
   const saleUnit = useMemo(() => categorySaleUnitOf(categories, form.categoryId), [categories, form.categoryId]);
+
+  useEffect(() => {
+    if (!form.pricedInUsd) return;
+    void resolveUsdTryRate()
+      .then((r) => {
+        setUsdTry(r);
+        setForm((prev) =>
+          prev.pricedInUsd && !String(prev.costUsdTryRate).trim()
+            ? { ...prev, costUsdTryRate: r.toFixed(4) }
+            : prev
+        );
+      })
+      .catch(() => setUsdTry(getCachedUsdTry()));
+  }, [form.pricedInUsd]);
 
   const applyBarcodeAndCode = () => {
     setFormMessage("");
@@ -92,33 +124,78 @@ export function ProductForm({ categories, suppliers, products, onCreated }: Prop
     const name = form.name.trim();
     const code = form.code.trim();
     const barcode = form.barcode.trim();
-    const priceParsed = parseTrAmount(form.priceTl);
-    const costParsed = parseTrAmount(String(form.costTl).trim() === "" ? "0" : form.costTl);
     const discountPercent = Number(form.discountPercent || 0);
     const stockRaw = String(form.stockQty).trim();
-    const stockQty = stockRaw === "" ? 0 : Number(stockRaw.replace(",", "."));
+    const stockQty = stockRaw === "" ? 0 : parseTrAmount(stockRaw);
 
-    if (
-      !name ||
-      !code ||
-      !barcode ||
-      priceParsed == null ||
-      priceParsed <= 0 ||
-      costParsed == null ||
-      costParsed < 0 ||
-      !Number.isFinite(discountPercent) ||
-      discountPercent < 0 ||
-      discountPercent > 100 ||
-      !Number.isFinite(stockQty) ||
-      stockQty < 0 ||
-      form.categoryId <= 0
-    ) {
-      setFormMessage("Lutfen zorunlu alanlari dogru doldurun.");
-      return;
+    let priceTl = 0;
+    let costTl = 0;
+    let priceUsdCents = 0;
+    let costUsdCents = 0;
+    let costUsdTryRate = 0;
+    let pricedInUsd = false;
+
+    if (form.pricedInUsd) {
+      const priceUsd = parseUsdAmount(form.priceUsd);
+      const costUsd = parseUsdAmount(String(form.costUsd).trim() === "" ? "0" : form.costUsd);
+      const gelisKuru = parseUsdTryRate(form.costUsdTryRate);
+      if (
+        !name ||
+        !code ||
+        !barcode ||
+        priceUsd == null ||
+        priceUsd < 0 ||
+        costUsd == null ||
+        costUsd < 0 ||
+        gelisKuru == null ||
+        !Number.isFinite(discountPercent) ||
+        discountPercent < 0 ||
+        discountPercent > 100 ||
+        stockQty == null ||
+        stockQty < 0 ||
+        form.categoryId <= 0
+      ) {
+        setFormMessage("Lutfen zorunlu alanlari dogru doldurun (dolar fiyatlari ve gelis kuru dahil).");
+        return;
+      }
+      let liveRate: number;
+      try {
+        liveRate = await resolveUsdTryRate();
+        setUsdTry(liveRate);
+      } catch (e) {
+        setFormMessage(e instanceof Error ? e.message : "Dolar kuru alinamadi.");
+        return;
+      }
+      pricedInUsd = true;
+      priceUsdCents = usdToCents(priceUsd);
+      costUsdCents = usdToCents(costUsd);
+      costUsdTryRate = gelisKuru;
+      priceTl = usdCentsToTlKurus(priceUsdCents, liveRate) / 100;
+      costTl = usdCentsToTlKurus(costUsdCents, gelisKuru) / 100;
+    } else {
+      const priceParsed = parseTrAmount(form.priceTl);
+      const costParsed = parseTrAmount(String(form.costTl).trim() === "" ? "0" : form.costTl);
+      if (
+        !name ||
+        !code ||
+        !barcode ||
+        priceParsed == null ||
+        priceParsed < 0 ||
+        costParsed == null ||
+        costParsed < 0 ||
+        !Number.isFinite(discountPercent) ||
+        discountPercent < 0 ||
+        discountPercent > 100 ||
+        stockQty == null ||
+        stockQty < 0 ||
+        form.categoryId <= 0
+      ) {
+        setFormMessage("Lutfen zorunlu alanlari dogru doldurun.");
+        return;
+      }
+      priceTl = priceParsed;
+      costTl = costParsed;
     }
-
-    const priceTl = priceParsed;
-    const costTl = costParsed;
 
     if (!validateProductBarcodeUnique(barcode, products)) {
       setFormMessage("Bu barkod baska bir urunde kayitli; farkli barkod girin veya barkod uretin.");
@@ -179,6 +256,10 @@ export function ProductForm({ categories, suppliers, products, onCreated }: Prop
         priceKurus: saleUnit === "gram" ? tlPer1000gToKurusPerGram(priceTl) : tlToKurus(priceTl),
         discountPercent,
         costPriceKurus,
+        pricedInUsd,
+        priceUsdCents,
+        costUsdCents,
+        costUsdTryRate,
         stockQty: stockRounded,
         ...(initialStockRemainingDebtKurus != null ? { initialStockRemainingDebtKurus } : {}),
         imagePath: form.imagePath.trim(),
@@ -264,6 +345,119 @@ export function ProductForm({ categories, suppliers, products, onCreated }: Prop
         <input type="checkbox" checked={form.domesticMade} onChange={(e) => setForm({ ...form, domesticMade: e.target.checked })} />
         Yerli uretim
       </label>
+      <h3 className="product-form-subheading">Dolar bazli satis</h3>
+      <label className="sale-unit-option product-form-checkbox-row">
+        <input
+          type="checkbox"
+          checked={form.pricedInUsd}
+          onChange={(e) => {
+            const checked = e.target.checked;
+            if (!checked && form.pricedInUsd) {
+              const tl = convertUsdFormToTlFields({
+                priceUsd: form.priceUsd,
+                costUsd: form.costUsd,
+                costUsdTryRate: form.costUsdTryRate,
+                fallbackPriceTl: form.priceTl,
+                fallbackCostTl: form.costTl,
+                liveUsdTry: usdTry
+              });
+              setForm({
+                ...form,
+                pricedInUsd: false,
+                priceUsd: "",
+                costUsd: "",
+                costUsdTryRate: "",
+                priceTl: tl.priceTl,
+                costTl: tl.costTl
+              });
+              return;
+            }
+            if (checked && !form.pricedInUsd) {
+              const usd = convertTlFormToUsdFields({
+                priceTl: form.priceTl,
+                costTl: form.costTl,
+                fallbackPriceUsd: form.priceUsd,
+                fallbackCostUsd: form.costUsd,
+                liveUsdTry: usdTry
+              });
+              setForm({
+                ...form,
+                pricedInUsd: true,
+                priceUsd: usd.priceUsd,
+                costUsd: usd.costUsd,
+                costUsdTryRate: form.costUsdTryRate || usd.costUsdTryRate
+              });
+              return;
+            }
+            setForm({ ...form, pricedInUsd: checked });
+          }}
+        />
+        <span>Dolar bazli (ithal) — satis guncel kur, gelis kayitli gelis kuru</span>
+      </label>
+      {form.pricedInUsd ? (
+        <>
+          <p className="form-note product-form-section-note">
+            <strong>Satis</strong> alt bardaki guncel USD/TRY ile hesaplanir
+            {usdTry != null ? (
+              <>
+                {" "}
+                (su an <strong>{formatFxTry(usdTry)}</strong>)
+              </>
+            ) : null}
+            . <strong>Gelis</strong> icin asagidaki &quot;hangi kurdan geldi&quot; kuru kaydedilir; maliyet o kurdan
+            yuvarlanir.
+          </p>
+          <input
+            type="number"
+            step="0.01"
+            min={0}
+            placeholder={saleUnit === "gram" ? "Satis (USD / 1000 g)" : "Satis fiyati (USD)"}
+            value={form.priceUsd}
+            onChange={(e) => setForm({ ...form, priceUsd: e.target.value })}
+            required
+          />
+          <p className="form-note">
+            Satis TL (guncel kur): {usdTlPreviewLabel(parseUsdAmount(form.priceUsd) ?? 0, usdTry)}
+            {saleUnit === "gram" ? " / 1000 g" : ""}
+          </p>
+          <input
+            type="number"
+            step="0.0001"
+            min={0}
+            placeholder="Gelis kuru (USD/TRY) — hangi kurdan geldi"
+            value={form.costUsdTryRate}
+            onChange={(e) => setForm({ ...form, costUsdTryRate: e.target.value })}
+            required
+          />
+          <p className="form-note">
+            <button
+              type="button"
+              className="linkish"
+              disabled={usdTry == null}
+              onClick={() => {
+                if (usdTry != null) setForm((prev) => ({ ...prev, costUsdTryRate: usdTry.toFixed(4) }));
+              }}
+            >
+              Guncel kuru gelis kuruna yaz
+            </button>
+          </p>
+          <input
+            type="number"
+            step="0.01"
+            min={0}
+            placeholder={saleUnit === "gram" ? "Gelis (USD / 1000 g)" : "Gelis / maliyet (USD)"}
+            value={form.costUsd}
+            onChange={(e) => setForm({ ...form, costUsd: e.target.value })}
+          />
+          <p className="form-note">
+            {costUsdArrivalPreview(
+              parseUsdAmount(String(form.costUsd).trim() === "" ? "0" : form.costUsd) ?? 0,
+              parseUsdTryRate(form.costUsdTryRate)
+            )}
+            {saleUnit === "gram" ? " / 1000 g" : ""}
+          </p>
+        </>
+      ) : null}
       <div className="image-input-row">
         <input
           placeholder="Barkod"
@@ -300,14 +494,16 @@ export function ProductForm({ categories, suppliers, products, onCreated }: Prop
           Kodu barkoda gore
         </button>
       </div>
-      <input
-        type="number"
-        step="0.01"
-        placeholder={pricePlaceholder(saleUnit)}
-        value={form.priceTl}
-        onChange={(e) => setForm({ ...form, priceTl: e.target.value })}
-        required
-      />
+      {!form.pricedInUsd ? (
+        <input
+          type="number"
+          step="0.01"
+          placeholder={pricePlaceholder(saleUnit)}
+          value={form.priceTl}
+          onChange={(e) => setForm({ ...form, priceTl: e.target.value })}
+          required
+        />
+      ) : null}
       <input placeholder="Malzeme / tedarik notu" value={form.material} onChange={(e) => setForm({ ...form, material: e.target.value })} />
       <div className="sale-unit-row" role="group" aria-label="KDV">
         <label className="sale-unit-option">
@@ -402,13 +598,15 @@ export function ProductForm({ categories, suppliers, products, onCreated }: Prop
         value={form.discountPercent}
         onChange={(e) => setForm({ ...form, discountPercent: e.target.value })}
       />
-      <input
-        type="text"
-        inputMode="decimal"
-        placeholder={costPlaceholder(saleUnit)}
-        value={form.costTl}
-        onChange={(e) => setForm({ ...form, costTl: e.target.value })}
-      />
+      {!form.pricedInUsd ? (
+        <input
+          type="text"
+          inputMode="decimal"
+          placeholder={costPlaceholder(saleUnit)}
+          value={form.costTl}
+          onChange={(e) => setForm({ ...form, costTl: e.target.value })}
+        />
+      ) : null}
       <input
         type="number"
         min={0}

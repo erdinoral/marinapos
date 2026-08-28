@@ -17,7 +17,7 @@ import {
   inventoryRevenueKurus,
   normalizeGramStockQty
 } from "../../utils/saleUnit";
-import { formatTry } from "../../utils/currency";
+import { formatTry, parseTrAmount } from "../../utils/currency";
 import {
   batchSiblingRows,
   isBulkReceiveBatchId,
@@ -30,6 +30,13 @@ import {
 import { computeInventoryTotals, lineInventoryCostKurus } from "../../utils/inventoryTotals";
 import { StockInventorySummary } from "./StockInventorySummary";
 import { productHasSupplier, productSupplierLabel } from "../../utils/productSuppliers";
+import {
+  centsToUsd,
+  effectiveProductCostKurus,
+  effectiveProductPriceKurus,
+  formatUsdTryRate,
+  productCostUsdTryRate
+} from "../../utils/usdPricing";
 import { BarcodePrintModal } from "./BarcodePrintModal";
 import { bulkInvoiceDraftSummary } from "./bulkInvoiceDraft";
 import { ReceiveStockModal } from "./ReceiveStockModal";
@@ -40,7 +47,8 @@ import { StockEntryLogList } from "./StockEntryLogList";
 
 function netRetailUnitKurus(p: Product): number {
   const d = Math.max(0, Math.min(100, Number(p.discountPercent ?? 0)));
-  return Math.round((p.priceKurus * (100 - d)) / 100);
+  const base = effectiveProductPriceKurus(p);
+  return Math.round((base * (100 - d)) / 100);
 }
 
 type ReceiveModalState = {
@@ -73,6 +81,7 @@ export function StockScreen({ products, lowStock, categories, suppliers, lowStoc
   const [deletingEntryId, setDeletingEntryId] = useState<number | null>(null);
   const [costLayers, setCostLayers] = useState<StockCostLayer[]>([]);
   const [barcodePrintOpen, setBarcodePrintOpen] = useState(false);
+  const [barcodePrintProduct, setBarcodePrintProduct] = useState<Product | null>(null);
   const [printSettings, setPrintSettings] = useState<Settings | null>(null);
   /** Stok / eksik liste: sag tik menusu */
   const [stockRowContext, setStockRowContext] = useState<{ x: number; y: number; product: Product } | null>(null);
@@ -137,6 +146,7 @@ export function StockScreen({ products, lowStock, categories, suppliers, lowStoc
 
   const openBarcodePrint = useCallback((product: Product) => {
     setSelectedId(product.id);
+    setBarcodePrintProduct(product);
     setBarcodePrintOpen(true);
     setStockRowContext(null);
   }, []);
@@ -195,6 +205,18 @@ export function StockScreen({ products, lowStock, categories, suppliers, lowStoc
     [entryLog, openEditInvoice]
   );
 
+  const reloadCostLayers = useCallback(async () => {
+    const api = getMarinaApi();
+    try {
+      if (typeof api.listStockCostLayers === "function") {
+        const layers = await api.listStockCostLayers();
+        setCostLayers(Array.isArray(layers) ? layers : []);
+      }
+    } catch {
+      setCostLayers([]);
+    }
+  }, []);
+
   const openListAdjustModal = (p: Product) => {
     const unit = categorySaleUnitOf(categories, p.categoryId);
     setListAdjustProduct(p);
@@ -206,7 +228,8 @@ export function StockScreen({ products, lowStock, categories, suppliers, lowStoc
 
   const submitListAdjust = async () => {
     if (!listAdjustProduct) return;
-    const counted = Math.round(Number(String(listAdjustCounted).replace(",", ".")));
+    const parsed = parseTrAmount(String(listAdjustCounted).trim());
+    const counted = parsed == null ? NaN : Math.round(parsed);
     if (!Number.isFinite(counted) || counted < 0) {
       window.alert("Stok miktari gecersiz.");
       return;
@@ -226,6 +249,7 @@ export function StockScreen({ products, lowStock, categories, suppliers, lowStoc
       setListAdjustCounted("");
       setListAdjustNote("");
       await onStockChange();
+      await reloadCostLayers();
     } catch (e) {
       window.alert(e instanceof Error ? e.message : "Stok guncellenemedi.");
     } finally {
@@ -269,13 +293,19 @@ export function StockScreen({ products, lowStock, categories, suppliers, lowStoc
   }, [products]);
 
   useEffect(() => {
+    if (!barcodePrintOpen || barcodePrintProduct == null) return;
+    const fresh = products.find((p) => p.id === barcodePrintProduct.id);
+    if (fresh) setBarcodePrintProduct(fresh);
+  }, [products, barcodePrintOpen, barcodePrintProduct?.id]);
+
+  useEffect(() => {
     if (selectedId == null) return;
     const onPointerDown = (e: PointerEvent) => {
       const t = e.target as HTMLElement | null;
       if (!t) return;
       if (
         t.closest(
-          ".stock-row-main, .stock-row.danger, .stock-entry-row--clickable, .stock-context-menu, .modal-backdrop, .modal-dialog, .stock-clear-selection-btn"
+          ".stock-row-main, .stock-row.danger, .stock-entry-row--clickable, .stock-context-menu, .modal-backdrop, .modal-dialog, .stock-clear-selection-btn, .barcode-print-overlay, .barcode-print-dialog"
         )
       ) {
         return;
@@ -319,6 +349,13 @@ export function StockScreen({ products, lowStock, categories, suppliers, lowStoc
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [detailProduct]);
+
+  useEffect(() => {
+    if (!detailProduct) return;
+    const fresh = products.find((p) => p.id === detailProduct.id);
+    if (fresh) setDetailProduct(fresh);
+    else setDetailProduct(null);
+  }, [products, detailProduct?.id]);
 
   const formatDateTime = (iso: string) => {
     const d = new Date(iso);
@@ -368,10 +405,13 @@ ${rows || `<tr><td colspan="4">Eksik urun yok</td></tr>`}
     doc.open();
     doc.write(html);
     doc.close();
+    let printed = false;
     const doPrint = () => {
+      if (printed) return;
+      printed = true;
       frame.contentWindow?.focus();
       frame.contentWindow?.print();
-      window.setTimeout(() => frame.remove(), 1200);
+      window.setTimeout(() => frame.remove(), 120000);
     };
     frame.onload = doPrint;
     window.setTimeout(doPrint, 250);
@@ -421,7 +461,7 @@ ${rows || `<tr><td colspan="4">Eksik urun yok</td></tr>`}
         await api.deleteStockEntry(row.movementId, row.productId);
       }
       await onStockChange();
-      await refreshEntryLog();
+      await Promise.all([refreshEntryLog(), reloadCostLayers()]);
     } catch (e) {
       window.alert(e instanceof Error ? e.message : "Stok girisi silinemedi.");
     } finally {
@@ -429,10 +469,8 @@ ${rows || `<tr><td colspan="4">Eksik urun yok</td></tr>`}
     }
   };
 
-  const listTotals = useMemo(
-    () => computeInventoryTotals(listFiltered, categories, costLayers),
-    [listFiltered, categories, costLayers]
-  );
+  // Her render'da hesapla: stok dusunce ciro/maliyet tutari aninda dussun.
+  const listTotals = computeInventoryTotals(listFiltered, categories, costLayers);
 
   return (
     <div className="stock-layout" ref={stockLayoutRef}>
@@ -581,7 +619,12 @@ ${rows || `<tr><td colspan="4">Eksik urun yok</td></tr>`}
                   {p.name}
                   <small className="product-card-meta">Tedarikci: {supplierLabel(p)}</small>
                 </span>
-                <span className="stock-row-main-qty">{stockLabelForProduct(p)}</span>
+                <span className="stock-row-main-qty">
+                  {stockLabelForProduct(p)}
+                  <small className="stock-row-main-value" title="Bu stok satilirsa tahmini tutar (liste fiyati)">
+                    {formatTry(inventoryRevenueKurus(p, categorySaleUnitOf(categories, p.categoryId)))}
+                  </small>
+                </span>
                 <button
                   type="button"
                   className="stock-detail-btn"
@@ -755,11 +798,16 @@ ${rows || `<tr><td colspan="4">Eksik urun yok</td></tr>`}
       ) : null}
       </div>
       <BarcodePrintModal
-        product={selectedProduct}
-        categorySaleUnit={selectedProduct ? categorySaleUnitOf(categories, selectedProduct.categoryId) : "piece"}
+        product={barcodePrintProduct}
+        categorySaleUnit={
+          barcodePrintProduct ? categorySaleUnitOf(categories, barcodePrintProduct.categoryId) : "piece"
+        }
         settings={printSettings}
-        open={barcodePrintOpen && Boolean(selectedProduct)}
-        onClose={() => setBarcodePrintOpen(false)}
+        open={barcodePrintOpen && Boolean(barcodePrintProduct)}
+        onClose={() => {
+          setBarcodePrintOpen(false);
+          setBarcodePrintProduct(null);
+        }}
         onSaved={onStockChange}
       />
       {stockRowContext ? (
@@ -844,7 +892,8 @@ ${rows || `<tr><td colspan="4">Eksik urun yok</td></tr>`}
               const live = products.find((x) => x.id === detailProduct.id) ?? detailProduct;
               const unit = categorySaleUnitOf(categories, live.categoryId);
               const unitLabel = unit === "gram" ? "gram" : "adet";
-              const costUnit = live.costPriceKurus ?? 0;
+              const costUnit = effectiveProductCostKurus(live);
+              const gelisKuru = productCostUsdTryRate(live);
               const invCost = lineInventoryCostKurus(live, unit, costLayers);
               const netSell = netRetailUnitKurus(live);
               const revenue = inventoryRevenueKurus(live, unit);
@@ -867,6 +916,15 @@ ${rows || `<tr><td colspan="4">Eksik urun yok</td></tr>`}
                         {unit === "gram" ? formatTlPer1000g(costUnit) : `${formatTry(costUnit)} / ${unitLabel}`}
                       </dd>
                     </div>
+                    {live.pricedInUsd && (live.costUsdCents ?? 0) > 0 ? (
+                      <div>
+                        <dt>Gelis (USD) / gelis kuru</dt>
+                        <dd>
+                          ${centsToUsd(live.costUsdCents).toFixed(2)}
+                          {gelisKuru != null ? ` × ${formatUsdTryRate(gelisKuru)}` : ""}
+                        </dd>
+                      </div>
+                    ) : null}
                     <div>
                       <dt>Eldeki stogun maliyet degeri</dt>
                       <dd>{formatTry(invCost)}</dd>
@@ -874,7 +932,9 @@ ${rows || `<tr><td colspan="4">Eksik urun yok</td></tr>`}
                     <div>
                       <dt>{unit === "gram" ? "Liste satis (1000 g, indirim oncesi)" : "Liste satis (birim, indirim oncesi)"}</dt>
                       <dd>
-                        {unit === "gram" ? formatTlPer1000g(live.priceKurus) : `${formatTry(live.priceKurus)} / ${unitLabel}`}
+                        {unit === "gram"
+                          ? formatTlPer1000g(effectiveProductPriceKurus(live))
+                          : `${formatTry(effectiveProductPriceKurus(live))} / ${unitLabel}`}
                       </dd>
                     </div>
                     {disc > 0 ? (
@@ -891,7 +951,14 @@ ${rows || `<tr><td colspan="4">Eksik urun yok</td></tr>`}
                     </div>
                     <div>
                       <dt>Stok satilirsa tahmini ciro</dt>
-                      <dd>{formatTry(revenue)}</dd>
+                      <dd>
+                        {formatTry(revenue)}
+                        <small className="stock-help">
+                          {" "}
+                          ({stockLabelForProduct(live)} ×{" "}
+                          {unit === "gram" ? formatTlPer1000g(netSell) : `${formatTry(netSell)} / adet`})
+                        </small>
+                      </dd>
                     </div>
                     <div className="stock-detail-dl-highlight">
                       <dt>Tahmini brut kar (bu stok)</dt>
@@ -935,6 +1002,10 @@ ${rows || `<tr><td colspan="4">Eksik urun yok</td></tr>`}
                   <p className="stock-receive-product-name">{live.name}</p>
                   <p className="stock-help small">
                     Kayitli stok: <strong>{stockLabelForProduct(live)}</strong> — Kod: {live.code} — Tedarikci: {supplierLabel(live)}
+                  </p>
+                  <p className="stock-help small">
+                    Buraya <strong>kalan gercek miktari</strong> yazin (or. 80). &quot;20 cikart&quot; icin 20 degil, eski stok − 20 girin.
+                    Not alanina &quot;cikarttik / ekledik / fire&quot; yazabilirsiniz.
                   </p>
                 </>
               );

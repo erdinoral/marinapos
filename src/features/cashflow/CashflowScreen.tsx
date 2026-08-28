@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { getMarinaApi } from "../../api/marinaClient";
 import type { CashflowEntry, CashflowMonthlySummary } from "../../types/models";
-import { formatTry, tlToKurus } from "../../utils/currency";
+import { formatTry, parseTrAmount, tlToKurus } from "../../utils/currency";
 
 function kindLabel(kind: CashflowEntry["kind"], row?: CashflowEntry): string {
   if (kind === "extra_income") return "Ek gelir";
@@ -58,7 +58,12 @@ export function CashflowScreen() {
 
   const submitExtra = async (e: React.FormEvent) => {
     e.preventDefault();
-    const amountKurus = tlToKurus(Number(String(extraTl).replace(",", ".")));
+    const amount = parseTrAmount(String(extraTl).trim());
+    if (amount == null || amount < 0) {
+      setError("Gecerli tutar girin.");
+      return;
+    }
+    const amountKurus = tlToKurus(amount);
     try {
       await getMarinaApi().createCashflowEntry({
         kind: "extra_income",
@@ -77,7 +82,12 @@ export function CashflowScreen() {
 
   const submitDaily = async (e: React.FormEvent) => {
     e.preventDefault();
-    const amountKurus = tlToKurus(Number(String(dailyTl).replace(",", ".")));
+    const amount = parseTrAmount(String(dailyTl).trim());
+    if (amount == null || amount < 0) {
+      setError("Gecerli tutar girin.");
+      return;
+    }
+    const amountKurus = tlToKurus(amount);
     try {
       await getMarinaApi().createCashflowEntry({
         kind: "expense_daily",
@@ -96,7 +106,12 @@ export function CashflowScreen() {
 
   const submitMonthly = async (e: React.FormEvent) => {
     e.preventDefault();
-    const amountKurus = tlToKurus(Number(String(monthlyTl).replace(",", ".")));
+    const amount = parseTrAmount(String(monthlyTl).trim());
+    if (amount == null || amount < 0) {
+      setError("Gecerli tutar girin.");
+      return;
+    }
+    const amountKurus = tlToKurus(amount);
     try {
       await getMarinaApi().createCashflowEntry({
         kind: "expense_monthly",

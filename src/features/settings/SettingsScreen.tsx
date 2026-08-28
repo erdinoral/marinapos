@@ -6,6 +6,7 @@ import { BackupFileInfo, BackupInspectResult, ErrorLogEntry, Settings } from "..
 import { BackupScopeModal } from "./BackupScopeModal";
 import { AppUpdateSection } from "./AppUpdateSection";
 import { FeedbackSection } from "./FeedbackSection";
+import { MobileConnectSection } from "./MobileConnectSection";
 function fmtDate(iso: string) {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString("tr-TR", { dateStyle: "short", timeStyle: "short" });
@@ -227,6 +228,8 @@ export function SettingsScreen() {
       </section>
 
       <AppUpdateSection />
+
+      <MobileConnectSection />
 
       <section className="settings-card">
         <div className="settings-card-head">

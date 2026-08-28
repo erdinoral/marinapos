@@ -1,6 +1,6 @@
 {
   "name": "marina-nargile-pos",
-  "version": "1.8.8",
+  "version": "1.9.24",
   "private": true,
   "description": "Marina Nargile POS otomasyon",
   "author": "Marina",
@@ -8,19 +8,21 @@
   "main": "dist-electron/electron/main.js",
   "scripts": {
     "electron:mark-cjs": "node scripts/ensure-dist-electron-cjs.mjs",
-    "dev": "concurrently \"vite\" \"tsc -p tsconfig.electron.json --watch\" \"wait-on tcp:5173 file:dist-electron/electron/main.js && npm run electron:mark-cjs && electron .\"",
+    "dev": "concurrently \"vite\" \"tsc -p tsconfig.electron.json --watch\" \"wait-on tcp:5173 file:dist-electron/electron/main.js && npm run electron:mark-cjs && set MARINA_VITE_DEV=1&& electron .\"",
     "copy:wasm": "node scripts/copy-transformers-wasm.mjs",
     "build": "tsc -b && vite build && tsc -p tsconfig.electron.json && npm run electron:mark-cjs",
     "postinstall": "node scripts/copy-transformers-wasm.mjs",
-    "pack": "npm run build && electron-builder --win --config.npmRebuild=false",
-    "pack:release": "node scripts/verify-release-ready.mjs && node scripts/write-supabase-license-from-env.mjs && npm run release:notes && npm run build && electron-builder --win --config.npmRebuild=false",
+    "pack": "npm run build && node scripts/run-electron-builder-win.mjs",
+    "pack:release": "node scripts/verify-release-ready.mjs && node scripts/write-supabase-license-from-env.mjs && npm run release:notes && npm run build && node scripts/run-electron-builder-win.mjs && node scripts/clean-old-release-setups.mjs",
+    "release:publish": "node scripts/verify-release-ready.mjs && node scripts/write-supabase-license-from-env.mjs && npm run release:notes && npm run build && node scripts/run-electron-builder-win.mjs --publish always && node scripts/clean-old-release-setups.mjs",
     "release:verify": "node scripts/verify-release-ready.mjs",
     "release:notes": "node scripts/extract-release-notes.mjs",
-    "publish:win": "npm run release:notes && npm run build && electron-builder --win --publish always --config.npmRebuild=false",
-    "pack:dir": "npm run build && electron-builder --win dir --config.npmRebuild=false",
+    "publish:win": "npm run release:notes && npm run build && node scripts/run-electron-builder-win.mjs --publish always",
+    "pack:dir": "npm run build && node scripts/run-electron-builder-win.mjs --win dir",
     "preview": "vite preview",
     "lint": "eslint .",
-    "start": "npm run electron:mark-cjs && electron ."
+    "start": "npm run electron:mark-cjs && electron .",
+    "start:fresh": "npm run build && npm run start"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.0",
@@ -28,6 +30,7 @@
     "electron-updater": "^6.8.3",
     "framer-motion": "^12.38.0",
     "jsbarcode": "^3.12.3",
+    "qrcode": "^1.5.4",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "xlsx": "^0.18.5"
@@ -37,6 +40,7 @@
     "@types/node": "^22.14.1",
     "@types/react": "^19.1.1",
     "@types/react-dom": "^19.1.2",
+    "@types/qrcode": "^1.5.5",
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
     "electron": "^35.1.4",

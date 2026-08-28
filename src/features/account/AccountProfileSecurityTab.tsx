@@ -5,6 +5,7 @@ import {
   signOutAllDevices,
   type AccountSecurityInfo
 } from "../../services/accountAuth";
+import { hasAppPinConfigured } from "../../services/appPin";
 
 function formatDateTime(iso: string | null) {
   if (!iso) return "—";
@@ -13,16 +14,22 @@ function formatDateTime(iso: string | null) {
   return d.toLocaleString("tr-TR", { dateStyle: "short", timeStyle: "short" });
 }
 
-export function AccountProfileSecurityTab() {
+type Props = {
+  onOpenPinTab?: () => void;
+};
+
+export function AccountProfileSecurityTab({ onOpenPinTab }: Props) {
   const [password, setPassword] = useState("");
   const [password2, setPassword2] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [msgOk, setMsgOk] = useState(false);
   const [security, setSecurity] = useState<AccountSecurityInfo | null>(null);
+  const [hasPin, setHasPin] = useState(false);
 
   useEffect(() => {
     void getAccountSecurityInfo().then(setSecurity);
+    setHasPin(hasAppPinConfigured());
   }, []);
 
   const submit = async () => {
@@ -81,11 +88,21 @@ export function AccountProfileSecurityTab() {
             <dt>Son giris</dt>
             <dd>{formatDateTime(security.lastSignInAt)}</dd>
           </div>
+          <div>
+            <dt>Uygulama PIN</dt>
+            <dd>{hasPin ? "Tanimli" : "Yok"}</dd>
+          </div>
         </dl>
       ) : null}
 
-      <p className="muted small account-profile-section-lead">
-        Oturum acikken yeni sifre belirleyebilirsiniz. Sifre degisikliginden sonra diger cihazlarda tekrar giris gerekebilir.
+      {onOpenPinTab ? (
+        <button type="button" className="account-profile-link-btn account-pin-jump" onClick={onOpenPinTab}>
+          PIN olustur / degistir →
+        </button>
+      ) : null}
+
+      <p className="muted small account-profile-section-lead" style={{ marginTop: "1rem" }}>
+        Oturum acikken uyelik (e-posta) sifrenizi degistirebilirsiniz.
       </p>
       <div className="account-auth-fields account-profile-fields">
         <label className="account-field">

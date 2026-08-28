@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseService } from "../db/databaseService";
-import { InvoiceCustomerInfo, PaymentType, SaleKind } from "../types/models";
+import { InvoiceCustomerInfo, PaymentType, SaleKind, SaleLineInput } from "../types/models";
 import { formatTry } from "../utils/currency";
+import { salePaymentLabel } from "../utils/paymentLabel";
 import { gramLineTotalKurus } from "../utils/saleUnit";
 
 function esc(text: string) {
@@ -30,9 +31,16 @@ function invoiceLogoDataUri() {
   return "";
 }
 
+function effectiveLineDiscountPercent(listLineTotalKurus: number, netLineTotalKurus: number): number {
+  const list = Math.abs(listLineTotalKurus);
+  const net = Math.abs(netLineTotalKurus);
+  if (list <= 0 || net >= list) return 0;
+  return Math.max(0, Math.min(100, Math.round(100 * (1 - net / list))));
+}
+
 export function buildInvoiceHtml(
   db: DatabaseService,
-  items: Array<{ productId: number; qty: number; unitPriceKurus?: number }>,
+  items: SaleLineInput[],
   paymentType: PaymentType,
   saleKind: SaleKind = "sale",
   customer?: InvoiceCustomerInfo,
@@ -46,26 +54,34 @@ export function buildInvoiceHtml(
       if (!p) return null;
       const cat = state.categories.find((c) => c.id === p.categoryId);
       const isGram = cat?.saleUnit === "gram";
-      const discount = Math.max(0, Math.min(100, Number(p.discountPercent ?? 0)));
+      const catalogDiscount = Math.max(0, Math.min(100, Number(p.discountPercent ?? 0)));
       const override =
         x.unitPriceKurus != null && Number.isFinite(x.unitPriceKurus) ? Math.round(x.unitPriceKurus) : null;
       const unitPrice =
-        override != null ? Math.max(0, override) : Math.round((p.priceKurus * (100 - discount)) / 100);
-      const lineTotal = isGram
-        ? gramLineTotalKurus(unitPrice, x.qty) * sign
-        : Math.round(x.qty * unitPrice) * sign;
-      return { p, qty: x.qty, unitPrice, lineTotal, discount, isGram };
+        override != null ? Math.max(0, override) : Math.round((p.priceKurus * (100 - catalogDiscount)) / 100);
+      const listLineTotal = (isGram ? gramLineTotalKurus(p.priceKurus, x.qty) : Math.round(x.qty * p.priceKurus)) * sign;
+      const lineTotal =
+        x.lineTotalKurus != null && Number.isFinite(x.lineTotalKurus)
+          ? Math.round(x.lineTotalKurus) * sign
+          : isGram
+            ? gramLineTotalKurus(unitPrice, x.qty) * sign
+            : Math.round(x.qty * unitPrice) * sign;
+      const discount = effectiveLineDiscountPercent(listLineTotal, lineTotal);
+      return { p, qty: x.qty, unitPrice, lineTotal, listLineTotal, discount, isGram };
     })
     .filter(Boolean) as Array<{
     p: (typeof state.products)[number];
     qty: number;
     unitPrice: number;
     lineTotal: number;
+    listLineTotal: number;
     discount: number;
     isGram: boolean;
   }>;
   if (normalized.length === 0) throw new Error("Fatura icin urun bulunamadi.");
   const subtotal = normalized.reduce((s, i) => s + i.lineTotal, 0);
+  const listSubtotal = normalized.reduce((s, i) => s + i.listLineTotal, 0);
+  const discountTotalKurus = Math.max(0, listSubtotal - subtotal);
   const extraRaw = Math.max(0, Math.round(Number(extraFeeKurus) || 0));
   const extraLineTotal = saleKind === "return" ? -extraRaw : extraRaw;
   const grandTotal = subtotal + extraLineTotal;
@@ -142,7 +158,7 @@ th,td{border:1px solid #666;padding:7px;font-size:12px;text-align:left}
     ${logoDataUri ? `<img src="${logoDataUri}" alt="Marina Logo" class="head-right-logo"/>` : ""}
     <div><strong>Fatura No:</strong> ${esc(no)}</div>
     <div><strong>Tarih:</strong> ${esc(now.toLocaleString("tr-TR"))}</div>
-    <div><strong>Odeme:</strong> ${paymentType === "cash" ? "Nakit" : "Kart"}</div>
+    <div><strong>Odeme:</strong> ${esc(salePaymentLabel(paymentType))}</div>
   </div>
 </div>
 <table style="margin-top:10px"><tbody>
@@ -167,6 +183,12 @@ ${
 }
 </tbody></table>
 <table class="totals">
+  ${
+    discountTotalKurus > 0
+      ? `<tr><td>Liste Toplam (indirim oncesi)</td><td class="r">${formatTry(listSubtotal)}</td></tr>
+  <tr><td>Uygulanan Indirim</td><td class="r">-${formatTry(discountTotalKurus)}</td></tr>`
+      : ""
+  }
   <tr><td>Ara Toplam (KDV Haric)</td><td class="r">${formatTry(matrah)}</td></tr>
   <tr><td>Hesaplanan KDV (urun oranlarina gore)</td><td class="r">${formatTry(kdv)}</td></tr>
   <tr><td>Urunler Vergiler Dahil</td><td class="r">${formatTry(subtotal)}</td></tr>
@@ -185,7 +207,7 @@ ${
 
 export function createInvoiceHtml(
   db: DatabaseService,
-  items: Array<{ productId: number; qty: number; unitPriceKurus?: number }>,
+  items: SaleLineInput[],
   paymentType: PaymentType,
   saleKind: SaleKind = "sale",
   outputDir?: string,

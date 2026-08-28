@@ -19,7 +19,10 @@ export function loadBulkInvoiceDraft(): BulkInvoiceDraft | null {
     if (!parsed || !Array.isArray(parsed.cart) || parsed.cart.length === 0) return null;
     return {
       supplierId: Number(parsed.supplierId) || 0,
-      cart: parsed.cart,
+      cart: parsed.cart.map((line) => ({
+        ...line,
+        linePaidTl: String((line as ReceiveCartLine & { remainingDebtTl?: string }).linePaidTl ?? "")
+      })),
       invoicePaidTl: String(parsed.invoicePaidTl ?? ""),
       pickerProductId: parsed.pickerProductId != null ? Number(parsed.pickerProductId) : null,
       productSearch: String(parsed.productSearch ?? "")

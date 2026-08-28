@@ -4,6 +4,16 @@ import type { AccountAuthConfig, AccountUser } from "../types/account";
 
 declare const __MARINA_SUPABASE_URL__: string;
 declare const __MARINA_SUPABASE_ANON_KEY__: string;
+declare const __MARINA_AUTH_REDIRECT_URL__: string;
+
+/** E-posta dogrulama / sifre sifirlama linkinin acacagi net onay sayfasi. */
+function authEmailRedirectTo(): string | undefined {
+  const fromBuild = String(
+    typeof __MARINA_AUTH_REDIRECT_URL__ !== "undefined" ? __MARINA_AUTH_REDIRECT_URL__ : ""
+  ).trim();
+  if (fromBuild) return fromBuild;
+  return undefined;
+}
 
 let client: SupabaseClient | null = null;
 let clientKey = "";
@@ -111,6 +121,50 @@ export async function signInAccount(email: string, password: string): Promise<Ac
   return sessionToUser(data.session);
 }
 
+/** Uyelik sifresi unutulursa Supabase e-posta sifirlama linki gonderir (PIN degil). */
+export async function requestAccountPasswordReset(email: string): Promise<void> {
+  const supabase = await getAccountAuthClient();
+  if (!supabase) throw new Error("Hesap servisi yapilandirilmamis.");
+  const mail = email.trim();
+  if (!mail.includes("@")) throw new Error("Gecerli bir e-posta girin.");
+  const redirectTo = authEmailRedirectTo();
+  const { error } = await supabase.auth.resetPasswordForEmail(
+    mail,
+    redirectTo ? { redirectTo } : undefined
+  );
+  if (error) throw new Error(error.message);
+}
+
+/** PIN sifirlama icin e-posta OTP (Supabase Auth e-posta kodu). */
+export async function sendAccountEmailOtp(email: string): Promise<void> {
+  const supabase = await getAccountAuthClient();
+  if (!supabase) throw new Error("Hesap servisi yapilandirilmamis.");
+  const mail = email.trim();
+  if (!mail.includes("@")) throw new Error("Gecerli bir e-posta girin.");
+  const { error } = await supabase.auth.signInWithOtp({
+    email: mail,
+    options: { shouldCreateUser: false }
+  });
+  if (error) throw new Error(error.message);
+}
+
+export async function verifyAccountEmailOtp(email: string, token: string): Promise<AccountUser> {
+  const supabase = await getAccountAuthClient();
+  if (!supabase) throw new Error("Hesap servisi yapilandirilmamis.");
+  const mail = email.trim();
+  const code = String(token ?? "").trim();
+  if (!mail.includes("@")) throw new Error("Gecerli bir e-posta girin.");
+  if (code.length < 6) throw new Error("E-postadaki dogrulama kodunu girin.");
+  const { data, error } = await supabase.auth.verifyOtp({
+    email: mail,
+    token: code,
+    type: "email"
+  });
+  if (error) throw new Error(error.message);
+  if (!data.session) throw new Error("Kod dogrulanamadi veya suresi doldu.");
+  return sessionToUser(data.session);
+}
+
 export async function signUpAccount(input: {
   email: string;
   password: string;
@@ -118,11 +172,13 @@ export async function signUpAccount(input: {
 }): Promise<{ user: AccountUser | null; needsEmailConfirmation: boolean }> {
   const supabase = await getAccountAuthClient();
   if (!supabase) throw new Error("Hesap servisi yapilandirilmamis.");
+  const redirectTo = authEmailRedirectTo();
   const { data, error } = await supabase.auth.signUp({
     email: input.email.trim(),
     password: input.password,
     options: {
-      data: { display_name: input.displayName.trim() }
+      data: { display_name: input.displayName.trim() },
+      ...(redirectTo ? { emailRedirectTo: redirectTo } : {})
     }
   });
   if (error) throw new Error(error.message);

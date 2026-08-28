@@ -3,6 +3,7 @@ import { getMarinaApi } from "../../api/marinaClient";
 import type { Category, Customer, PaymentType, Product, SaleKind, SaleRecord, SaleWithLines } from "../../types/models";
 import { formatTry } from "../../utils/currency";
 import { saleCollectedKurus, saleKindListLabel } from "../../utils/saleCollected";
+import { salePaymentLabel } from "../../utils/paymentLabel";
 import { formatSaleDateTime } from "../../utils/saleFormat";
 import { saleMatchesCatalogFilter, type SaleCatalogUnitFilter } from "../../utils/saleListFilter";
 import { SaleDetailDialog } from "./SaleDetailDialog";
@@ -178,6 +179,7 @@ export function SalesHistoryPanel({ products, categories, active = true, onStart
               <option value="all">Tumu</option>
               <option value="cash">Nakit</option>
               <option value="card">Kart</option>
+              <option value="mixed">Karma</option>
             </select>
           </label>
           <label className="today-sales-field today-sales-field-grow">
@@ -267,7 +269,10 @@ export function SalesHistoryPanel({ products, categories, active = true, onStart
                   {cust ? ` · ${cust}` : ""}
                 </span>
                 <span className="sales-summary-pay">
-                  {saleKindListLabel(sale.kind)} · {sale.paymentType === "cash" ? "Nakit" : "Kart"}
+                  {saleKindListLabel(sale.kind)} · {salePaymentLabel(sale.paymentType)}
+                  {sale.paymentType === "mixed" && (sale.cashAmountKurus != null || sale.cardAmountKurus != null)
+                    ? ` (${formatTry(sale.cashAmountKurus ?? 0)} nakit + ${formatTry(sale.cardAmountKurus ?? 0)} kart)`
+                    : null}
                   {sale.paymentNote?.trim() ? ` · ${sale.paymentNote.trim()}` : null}
                 </span>
                 <span className="sales-amount">{formatTry(saleCollectedKurus(sale))}</span>

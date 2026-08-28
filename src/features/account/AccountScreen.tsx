@@ -15,9 +15,10 @@ type Props = {
   onOpenSettings?: () => void;
   onOpenLegal?: (kind: LegalKind) => void;
   onCompanySaved?: () => void | Promise<void>;
+  onSignedOut?: () => void;
 };
 
-export function AccountScreen({ onOpenSettings, onOpenLegal, onCompanySaved }: Props) {
+export function AccountScreen({ onOpenSettings, onOpenLegal, onCompanySaved, onSignedOut }: Props) {
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [feedbackConfigured, setFeedbackConfigured] = useState<boolean | null>(null);
   const [user, setUser] = useState<AccountUser | null>(null);
@@ -106,7 +107,10 @@ export function AccountScreen({ onOpenSettings, onOpenLegal, onCompanySaved }: P
             user={user}
             feedbackConfigured={feedbackConfigured === true}
             onUserChange={setUser}
-            onSignedOut={() => setUser(null)}
+            onSignedOut={() => {
+              setUser(null);
+              onSignedOut?.();
+            }}
             onOpenSettings={onOpenSettings ?? (() => {})}
             onOpenLegal={onOpenLegal ?? (() => {})}
             onCompanySaved={onCompanySaved}

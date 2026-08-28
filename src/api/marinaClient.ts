@@ -72,8 +72,19 @@ function createDevServerMarinaApi(): MarinaApi {
       kind: SaleKind = "sale",
       cartName = "Sepet 1",
       customerId?: number | null,
-      extraFeeKurus?: number
-    ) => devInvoke("sales:create", [items, paymentType, paidAmount, kind, cartName, customerId ?? null, extraFeeKurus ?? 0]),
+      extraFeeKurus?: number,
+      paymentSplit?: { cashAmountKurus: number; cardAmountKurus: number } | null
+    ) =>
+      devInvoke("sales:create", [
+        items,
+        paymentType,
+        paidAmount,
+        kind,
+        cartName,
+        customerId ?? null,
+        extraFeeKurus ?? 0,
+        paymentSplit ?? null
+      ]),
     recordCustomerDebtPayment: (
       customerId: number,
       paymentType: PaymentType,
@@ -153,7 +164,18 @@ function createDevServerMarinaApi(): MarinaApi {
     getAppUpdateInfo: () => devInvoke("app-update:get-info", []),
     checkForAppUpdate: () => devInvoke("app-update:check", []),
     downloadAppUpdate: () => devInvoke("app-update:download", []),
-    installAppUpdate: () => devInvoke("app-update:install", [])
+    installAppUpdate: () => devInvoke("app-update:install", []),
+    getMobileLanStatus: () => devInvoke("mobile:get-status"),
+    setMobileLanEnabled: (enabled: boolean) => devInvoke("mobile:set-enabled", [enabled]),
+    regenerateMobileLanToken: () => devInvoke("mobile:regenerate-token"),
+    getMobileLanPairPayload: () => devInvoke("mobile:get-pair-payload"),
+    getMobileLanQrDataUrl: () => devInvoke("mobile:get-qr-dataurl"),
+    getMobileApkQrDataUrl: () => devInvoke("mobile:get-apk-qr-dataurl"),
+    posCartPull: () => devInvoke("pos-cart:pull"),
+    posCartPush: (payload) => devInvoke("pos-cart:push", [payload]),
+    posCartAckOps: (opIds: string[]) => devInvoke("pos-cart:ack-ops", [opIds]),
+    posCartClear: () => devInvoke("pos-cart:clear"),
+    printHtml: (html, opts) => devInvoke("print:html", [html, opts ?? {}])
   };
 }
 
