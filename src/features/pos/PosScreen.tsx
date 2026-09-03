@@ -456,6 +456,8 @@ export function PosScreen({
   const [paidAmountTl, setPaidAmountTl] = useState("");
   const [mixedCashTl, setMixedCashTl] = useState("");
   const [mixedCardTl, setMixedCardTl] = useState("");
+  /** Musteri acik borcunu bu satis tahsilatina dahil et (satis + borc birlikte cek) */
+  const [includeOpenDebt, setIncludeOpenDebt] = useState(false);
   const [dailySales, setDailySales] = useState<SaleRecord[]>([]);
   const [dailySaleProductIds, setDailySaleProductIds] = useState<Record<number, number[]>>({});
   /** Bugunun satislari sekmesi: liste filtre / siralama */
@@ -1074,6 +1076,7 @@ export function PosScreen({
     setPaidAmountTl("");
     setMixedCashTl("");
     setMixedCardTl("");
+    setIncludeOpenDebt(false);
     setSearch("");
     setPosSaleUnitFilter("all");
     setPosCategoryFilter(0);
@@ -1083,6 +1086,9 @@ export function PosScreen({
     return saleKind === "sale" && paymentType === "card" && raw != null && raw > 0 ? tlToKurus(raw) : 0;
   }, [activeCart?.cardSpecialTl, saleKind, paymentType]);
   const totalKurus = linesTotalKurus + cardExtraKurus;
+  const openDebtKurus = selectedPosCustomer?.balanceOwedKurus ?? 0;
+  const chargeTargetKurus =
+    saleKind === "sale" && includeOpenDebt && openDebtKurus > 0 ? totalKurus + openDebtKurus : totalKurus;
   const mixedCashKurus = useMemo(() => {
     if (saleKind !== "sale" || paymentType !== "mixed") return 0;
     const n = parseTrAmount(mixedCashTl.trim());
@@ -1101,14 +1107,57 @@ export function PosScreen({
     return (Math.round(tl * 100) / 100).toFixed(2);
   }, []);
 
+  const applyChargeTargetToPaymentFields = useCallback(
+    (targetKurus: number, mode: PaymentType) => {
+      const tl = formatMixedRemainTl(targetKurus);
+      if (mode === "mixed") {
+        setMixedCashTl("");
+        setMixedCardTl(tl);
+      } else {
+        setPaidAmountTl(tl);
+      }
+    },
+    [formatMixedRemainTl]
+  );
+
+  const onIncludeOpenDebtChange = useCallback(
+    (on: boolean) => {
+      setIncludeOpenDebt(on);
+      if (!on) {
+        setPaidAmountTl("");
+        setMixedCashTl("");
+        setMixedCardTl("");
+        return;
+      }
+      if (!selectedPosCustomer || selectedPosCustomer.balanceOwedKurus <= 0) {
+        setIncludeOpenDebt(false);
+        return;
+      }
+      applyChargeTargetToPaymentFields(totalKurus + selectedPosCustomer.balanceOwedKurus, paymentType);
+    },
+    [applyChargeTargetToPaymentFields, paymentType, selectedPosCustomer, totalKurus]
+  );
+
+  useEffect(() => {
+    if (!includeOpenDebt) return;
+    if (openDebtKurus <= 0) {
+      setIncludeOpenDebt(false);
+      setPaidAmountTl("");
+      setMixedCashTl("");
+      setMixedCardTl("");
+      return;
+    }
+    applyChargeTargetToPaymentFields(totalKurus + openDebtKurus, paymentType);
+  }, [includeOpenDebt, totalKurus, openDebtKurus, paymentType, applyChargeTargetToPaymentFields]);
+
   const onMixedCashTlChange = useCallback(
     (raw: string) => {
       setMixedCashTl(raw);
       const n = parseTrAmount(raw.trim());
       if (n == null) return;
-      setMixedCardTl(formatMixedRemainTl(totalKurus - tlToKurus(n)));
+      setMixedCardTl(formatMixedRemainTl(chargeTargetKurus - tlToKurus(n)));
     },
-    [formatMixedRemainTl, totalKurus]
+    [formatMixedRemainTl, chargeTargetKurus]
   );
 
   const onMixedCardTlChange = useCallback(
@@ -1116,42 +1165,79 @@ export function PosScreen({
       setMixedCardTl(raw);
       const n = parseTrAmount(raw.trim());
       if (n == null) return;
-      setMixedCashTl(formatMixedRemainTl(totalKurus - tlToKurus(n)));
+      setMixedCashTl(formatMixedRemainTl(chargeTargetKurus - tlToKurus(n)));
     },
-    [formatMixedRemainTl, totalKurus]
+    [formatMixedRemainTl, chargeTargetKurus]
   );
 
   const paidAmountKurus = useMemo(() => {
     if (saleKind !== "sale") return totalKurus;
-    if (paymentType === "mixed") return mixedCashKurus + mixedCardKurus;
+    if (paymentType === "mixed") {
+      if (!mixedCashTl.trim() && !mixedCardTl.trim()) {
+        return includeOpenDebt && openDebtKurus > 0 ? chargeTargetKurus : totalKurus;
+      }
+      return mixedCashKurus + mixedCardKurus;
+    }
     if (paymentType !== "cash" && paymentType !== "card") return totalKurus;
     const raw = paidAmountTl.trim();
-    if (!raw) return totalKurus;
+    if (!raw) return includeOpenDebt && openDebtKurus > 0 ? chargeTargetKurus : totalKurus;
     const n = parseTrAmount(raw);
     return n != null && n >= 0 ? tlToKurus(n) : totalKurus;
-  }, [paidAmountTl, paymentType, saleKind, totalKurus, mixedCashKurus, mixedCardKurus]);
+  }, [
+    paidAmountTl,
+    paymentType,
+    saleKind,
+    totalKurus,
+    mixedCashKurus,
+    mixedCardKurus,
+    mixedCashTl,
+    mixedCardTl,
+    includeOpenDebt,
+    openDebtKurus,
+    chargeTargetKurus
+  ]);
 
   const saleShortfallKurus = useMemo(() => {
     if (saleKind !== "sale") return 0;
     if (paymentType === "mixed") {
-      if (!mixedCashTl.trim() && !mixedCardTl.trim()) return 0;
+      if (!mixedCashTl.trim() && !mixedCardTl.trim() && !(includeOpenDebt && openDebtKurus > 0)) return 0;
       return Math.max(0, totalKurus - paidAmountKurus);
     }
     if (paymentType !== "cash" && paymentType !== "card") return 0;
-    if (!paidAmountTl.trim()) return 0;
+    if (!paidAmountTl.trim() && !(includeOpenDebt && openDebtKurus > 0)) return 0;
     return Math.max(0, totalKurus - paidAmountKurus);
-  }, [saleKind, paymentType, paidAmountTl, mixedCashTl, mixedCardTl, totalKurus, paidAmountKurus]);
+  }, [
+    saleKind,
+    paymentType,
+    paidAmountTl,
+    mixedCashTl,
+    mixedCardTl,
+    totalKurus,
+    paidAmountKurus,
+    includeOpenDebt,
+    openDebtKurus
+  ]);
 
   const saleSurplusKurus = useMemo(() => {
     if (saleKind !== "sale") return 0;
     if (paymentType === "mixed") {
-      if (!mixedCashTl.trim() && !mixedCardTl.trim()) return 0;
+      if (!mixedCashTl.trim() && !mixedCardTl.trim() && !(includeOpenDebt && openDebtKurus > 0)) return 0;
       return salePaymentSurplusKurus(paidAmountKurus, totalKurus);
     }
     if (paymentType !== "cash" && paymentType !== "card") return 0;
-    if (!paidAmountTl.trim()) return 0;
+    if (!paidAmountTl.trim() && !(includeOpenDebt && openDebtKurus > 0)) return 0;
     return salePaymentSurplusKurus(paidAmountKurus, totalKurus);
-  }, [saleKind, paymentType, paidAmountTl, mixedCashTl, mixedCardTl, paidAmountKurus, totalKurus]);
+  }, [
+    saleKind,
+    paymentType,
+    paidAmountTl,
+    mixedCashTl,
+    mixedCardTl,
+    paidAmountKurus,
+    totalKurus,
+    includeOpenDebt,
+    openDebtKurus
+  ]);
 
   const saleDebtPaymentKurus = useMemo(() => {
     if (!selectedPosCustomer || saleSurplusKurus <= 0) return 0;
@@ -2641,6 +2727,18 @@ export function PosScreen({
                     <th scope="row">Genel toplam</th>
                     <td>{formatTry(totalKurus)}</td>
                   </tr>
+                  {saleKind === "sale" && includeOpenDebt && openDebtKurus > 0 ? (
+                    <>
+                      <tr className="cart-payment-table-debt cart-payment-table-debt--paid">
+                        <th scope="row">Acik borc</th>
+                        <td>+{formatTry(openDebtKurus)}</td>
+                      </tr>
+                      <tr className="cart-payment-table-total">
+                        <th scope="row">Cekilecek toplam</th>
+                        <td>{formatTry(chargeTargetKurus)}</td>
+                      </tr>
+                    </>
+                  ) : null}
                   {saleKind === "sale" && (paymentType === "cash" || paymentType === "card" || paymentType === "mixed") ? (
                     <>
                       {paymentType === "mixed" ? (
@@ -2731,6 +2829,19 @@ export function PosScreen({
                 Karma
               </button>
             </div>
+            {saleKind === "sale" && selectedPosCustomer && openDebtKurus > 0 ? (
+              <label className="cart-include-debt">
+                <input
+                  type="checkbox"
+                  checked={includeOpenDebt}
+                  onChange={(e) => onIncludeOpenDebtChange(e.target.checked)}
+                />
+                <span>
+                  Acik borcu dahil et ({formatTry(openDebtKurus)}) — satis + borc birlikte cekilsin
+                  {includeOpenDebt ? ` · ${formatTry(chargeTargetKurus)}` : ""}
+                </span>
+              </label>
+            ) : null}
             {saleKind === "sale" && paymentType === "card" ? (
               <p className="cart-card-price-hint muted small">
                 Urun kartinda kart fiyati tanimliysa, sepette Toptan secili olmayan satirlarda o birim fiyat gecerlidir.
@@ -2785,8 +2896,12 @@ export function PosScreen({
                 <p className="change-hint muted small">
                   {selectedPosCustomer
                     ? paymentType === "cash"
-                      ? "Genel toplamdan fazla alinan tutar once acik borca yazilir; kalan varsa para ustu verilir. Eksik odeme yeni borc olur."
-                      : "Genel toplamdan fazla cekilen tutar acik borcu dusurur. Eksik cekim yeni borc olur."
+                      ? includeOpenDebt
+                        ? "Acik borc dahil: alinan tutar satis + borc. Fazla nakit para ustu olur."
+                        : "Genel toplamdan fazla alinan tutar once acik borca yazilir; kalan varsa para ustu verilir. Eksik odeme yeni borc olur."
+                      : includeOpenDebt
+                        ? "Acik borc dahil: karttan satis + borc birlikte cekilir."
+                        : "Genel toplamdan fazla cekilen tutar acik borcu dusurur. Eksik cekim yeni borc olur."
                     : "Eksik odeme icin once musteri secin; aksi halde satis tamamlanamaz."}
                 </p>
               </>
@@ -2829,6 +2944,16 @@ export function PosScreen({
                         <span>Mevcut borc</span>
                         <strong>{formatTry(selectedPosCustomer.balanceOwedKurus)}</strong>
                       </div>
+                      {saleKind === "sale" && selectedPosCustomer.balanceOwedKurus > 0 ? (
+                        <label className="cart-include-debt cart-include-debt--panel">
+                          <input
+                            type="checkbox"
+                            checked={includeOpenDebt}
+                            onChange={(e) => onIncludeOpenDebtChange(e.target.checked)}
+                          />
+                          <span>Bu satista borcu da cek</span>
+                        </label>
+                      ) : null}
                       {saleKind === "sale" && (paymentType === "cash" || paymentType === "card" || paymentType === "mixed") ? (
                         <>
                           <div

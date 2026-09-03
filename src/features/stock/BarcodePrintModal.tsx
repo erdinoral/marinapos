@@ -322,6 +322,7 @@ export function BarcodePrintModal({ product, categorySaleUnit = "piece", setting
   const detailFs = layoutFonts.detail;
   const companyFs = layoutFonts.company;
   const isSquareLabel = labelSize.id === "100x100";
+  const isCompactLabel = labelSize.id === "40x20";
 
   const buildLabelPrintHtml = (logoDataUrl = yerliLogoDataUrl): string | null => {
     const { name, description, barcodeValue, priceDigits, includesVat, vatPct, priceDate, companyName } = labelView;
@@ -432,13 +433,14 @@ export function BarcodePrintModal({ product, categorySaleUnit = "piece", setting
     line-height: 1.08;
     text-transform: uppercase;
     letter-spacing: 0.02em;
-    max-height: ${isSquareLabel ? "2.4em" : "3.2em"};
+    max-height: ${isCompactLabel ? "2.2em" : isSquareLabel ? "2.4em" : "2.2em"};
     overflow: hidden;
     word-break: break-word;
     color: #111;
     padding: 0;
     width: 100%;
     box-sizing: border-box;
+    flex: 0 0 auto;
   }
   .name.is-black {
     background: #000 !important;
@@ -451,11 +453,12 @@ export function BarcodePrintModal({ product, categorySaleUnit = "piece", setting
     text-align: center;
     font-size: ${labelSize.fonts.desc};
     font-weight: 600;
-    line-height: 1.2;
-    max-height: ${isSquareLabel ? "2.6em" : "3.6em"};
+    line-height: 1.15;
+    max-height: ${isCompactLabel ? "1.3em" : isSquareLabel ? "2.6em" : "2.4em"};
     overflow: hidden;
     word-break: break-word;
     color: #111;
+    flex: 0 0 auto;
   }
   .foot {
     margin-top: 0;
@@ -571,19 +574,19 @@ export function BarcodePrintModal({ product, categorySaleUnit = "piece", setting
   }
   .bc-wrap {
     margin: 0;
-    padding-top: ${isSquareLabel ? "0.8mm" : "0.45mm"};
+    padding-top: ${isCompactLabel ? "0.2mm" : isSquareLabel ? "0.8mm" : "0.45mm"};
     text-align: center;
     line-height: 0;
     flex: 0 0 auto;
     width: 100%;
-    max-height: ${isSquareLabel ? "28mm" : "none"};
+    max-height: ${isSquareLabel ? "28mm" : isCompactLabel ? "8mm" : "none"};
     overflow: visible;
   }
   .bc-wrap svg {
     max-width: 100%;
     width: 100%;
     height: auto;
-    max-height: ${isSquareLabel ? "30mm" : "none"};
+    max-height: ${isSquareLabel ? "30mm" : isCompactLabel ? "7.5mm" : "none"};
     display: block;
     margin: 0 auto;
   }
@@ -966,21 +969,12 @@ ${squarePrintLayout}
               Onizleme · {formatLabelSizeMm(labelSize)}
             </p>
             <p className="barcode-label-print-hint">
-              {labelSize.id === "100x100" ? (
-                <>
-                  <strong>100×100 mm</strong> fiziksel etiket rulonuz takili olmali. Xprinter surucusunde kâgit boyutu da{" "}
-                  <strong>100×100 mm</strong> olarak tanimli olmali — 60×40 ayariyla 100×100 baski bos cikar. Olcek{" "}
-                  <strong>%100</strong>.
-                </>
-              ) : (
-                <>
-                  Yazicida kâgit/etiket boyutu buradaki secimle ayni olmali ({formatLabelSizeMm(labelSize)}). Yazdir
-                  penceresinde olcek <strong>%100</strong> — Doldur veya Sigdir kullanmayin.
-                </>
-              )}
+              Yazicida kâgit/etiket boyutu buradaki secimle ayni olmali ({formatLabelSizeMm(labelSize)}). Yazdir
+              penceresinde olcek <strong>%100</strong> — Doldur / Sigdir kullanmayin. Bos alan doldurma kapali:
+              onizlemede ne varsa baskida o cikar.
             </p>
             <div
-              className={`barcode-label-preview${layoutScale === "dense" ? " is-dense" : ""}${layoutScale === "air" ? " is-air" : ""} size-${labelSize.id}`}
+              className={`barcode-label-preview${layoutScale === "dense" ? " is-dense" : ""} size-${labelSize.id}`}
               style={{
                 maxWidth: labelSize.previewMaxPx,
                 aspectRatio: `${labelSize.widthMm} / ${labelSize.heightMm}`,

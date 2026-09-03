@@ -1524,6 +1524,94 @@ body { background: #121212; color: #f3f3f3; }
   flex-direction: column;
   gap: 10px;
 }
+.category-bulk-price {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #3a3220;
+  border-radius: 10px;
+  background: #17140f;
+  flex: 0 0 auto;
+}
+.category-bulk-price-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 12px;
+  margin-bottom: 8px;
+}
+.category-bulk-price-head strong {
+  color: #e8c97a;
+  font-size: 13px;
+}
+.category-bulk-price-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.category-bulk-price-segment {
+  display: inline-flex;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.category-bulk-price-segment button {
+  min-width: 2.2rem;
+  padding: 7px 10px;
+  border: 0;
+  border-right: 1px solid #3a3a3a;
+  background: #1a1a1a;
+  color: #cfcfcf;
+  cursor: pointer;
+  font-weight: 700;
+}
+.category-bulk-price-segment button:last-child {
+  border-right: 0;
+}
+.category-bulk-price-segment button.active {
+  background: #2a2418;
+  color: #f5e6c8;
+}
+.category-bulk-price-segment button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.category-bulk-price-input {
+  width: 7rem;
+  padding: 7px 10px;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  background: #121212;
+  color: #eee;
+}
+.category-bulk-price-apply {
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid #b88f43;
+  background: #2a2418;
+  color: #f5e6c8;
+  font-weight: 700;
+  cursor: pointer;
+}
+.category-bulk-price-apply:hover:not(:disabled) {
+  background: #3a3020;
+}
+.category-bulk-price-apply:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.category-bulk-price-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: #cfcfcf;
+  font-size: 12px;
+  cursor: pointer;
+}
+.category-bulk-price-check input {
+  accent-color: #c9a45a;
+}
 .category-edit-products {
   margin: 0;
   max-height: min(42vh, 360px);
@@ -2851,6 +2939,30 @@ body { background: #121212; color: #f3f3f3; }
 }
 .cart-price-source { display: block; font-size: 10px; color: #b88f43; margin-top: 2px; }
 .change-hint { font-size: 12px; color: #bdbdbd; }
+.cart-include-debt {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 8px 0 4px;
+  padding: 8px 10px;
+  border: 1px solid #3a3220;
+  border-radius: 8px;
+  background: #1a1710;
+  color: #e8c97a;
+  font-size: 12px;
+  line-height: 1.35;
+  cursor: pointer;
+  user-select: none;
+}
+.cart-include-debt input {
+  margin-top: 2px;
+  flex: 0 0 auto;
+  accent-color: #c9a45a;
+}
+.cart-include-debt--panel {
+  margin: 4px 0 8px;
+  padding: 6px 8px;
+}
 .recent-sales-title { margin: 14px 0 8px; font-size: 14px; color: #e8d4a8; }
 .today-sales-toolbar {
   display: flex;
@@ -7935,7 +8047,7 @@ body { background: #121212; color: #f3f3f3; }
 }
 .barcode-label-size-list {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin-top: 8px;
 }
@@ -7988,6 +8100,32 @@ body { background: #121212; color: #f3f3f3; }
   padding: 3.5% 4% 2.5%;
   gap: 2%;
 }
+.barcode-label-preview.size-40x20 {
+  padding: 2% 2.5% 1.5%;
+  gap: 1%;
+}
+.barcode-label-preview.size-40x20 .blp-name {
+  max-height: 2.2em;
+  line-height: 1.05;
+}
+.barcode-label-preview.size-40x20 .blp-desc {
+  max-height: 1.3em;
+}
+.barcode-label-preview.size-40x20 .blp-bc {
+  padding-top: 0.3%;
+  max-height: 38%;
+}
+.barcode-label-preview.size-40x20 .blp-bc svg {
+  max-height: 42px;
+}
+.barcode-label-preview.size-40x20 .blp-left {
+  flex: 1 1 42%;
+  max-width: 44%;
+}
+.barcode-label-preview.size-40x20 .blp-right {
+  flex: 0 1 54%;
+  max-width: 56%;
+}
 .blp-top {
   display: flex;
   flex-direction: column;
@@ -8004,7 +8142,7 @@ body { background: #121212; color: #f3f3f3; }
   line-height: 1.1;
   text-transform: uppercase;
   letter-spacing: 0.02em;
-  max-height: 2.4em;
+  max-height: 2.2em;
   overflow: hidden;
   word-break: break-word;
   flex: 0 0 auto;
@@ -8022,8 +8160,8 @@ body { background: #121212; color: #f3f3f3; }
   margin: 0;
   text-align: center;
   font-weight: 600;
-  line-height: 1.2;
-  max-height: 3.6em;
+  line-height: 1.15;
+  max-height: 2.4em;
   overflow: hidden;
   word-break: break-word;
   color: #222;

@@ -109,6 +109,20 @@ const emptySupplierExtra = {
   taxNumber: ""
 };
 
+function formatBulkPriceTl(n: number): string {
+  const v = Math.max(0, Math.round(n * 100) / 100);
+  if (Number.isInteger(v)) return String(v);
+  return v.toFixed(2);
+}
+
+function applyBulkPriceTl(rawTl: string, signedDelta: number, mode: "percent" | "amount"): string | null {
+  const n = parseTrAmount(String(rawTl).trim());
+  if (n == null || n < 0) return null;
+  if (n === 0 && mode === "percent") return formatBulkPriceTl(0);
+  const next = mode === "percent" ? n * (1 + signedDelta / 100) : n + signedDelta;
+  return formatBulkPriceTl(next);
+}
+
 export function CategoryForm({ categories, suppliers, products, onCreated }: Props) {
   const supplierDebtTotalKurus = totalSupplierDebtKurus(suppliers);
   const categoryListRef = useRef<HTMLUListElement | null>(null);
@@ -122,6 +136,10 @@ export function CategoryForm({ categories, suppliers, products, onCreated }: Pro
   const [categoryEditUnit, setCategoryEditUnit] = useState<CategorySaleUnit>("piece");
   const [categoryProductRows, setCategoryProductRows] = useState<CategoryProductRow[]>([]);
   const [categoryEditSaving, setCategoryEditSaving] = useState(false);
+  const [bulkPriceMode, setBulkPriceMode] = useState<"percent" | "amount">("percent");
+  const [bulkPriceSign, setBulkPriceSign] = useState<"plus" | "minus">("plus");
+  const [bulkPriceValue, setBulkPriceValue] = useState("");
+  const [bulkApplyWholesale, setBulkApplyWholesale] = useState(true);
   const [supplierEdit, setSupplierEdit] = useState<Supplier | null>(null);
   const [supplierEditForm, setSupplierEditForm] = useState({ name: "", balanceTl: "", ...emptySupplierExtra });
   const [supplierEditSaving, setSupplierEditSaving] = useState(false);
@@ -159,6 +177,54 @@ export function CategoryForm({ categories, suppliers, products, onCreated }: Pro
     setCategoryEditName(c.name);
     setCategoryEditUnit(c.saleUnit);
     setCategoryProductRows(productRowsForCategory(products, c.id, c.saleUnit));
+    setBulkPriceMode("percent");
+    setBulkPriceSign("plus");
+    setBulkPriceValue("");
+    setBulkApplyWholesale(true);
+  };
+
+  const applyCategoryBulkPrices = () => {
+    const raw = parseTrAmount(String(bulkPriceValue).trim());
+    if (raw == null || raw < 0) {
+      window.alert(bulkPriceMode === "percent" ? "Gecerli bir yuzde girin." : "Gecerli bir tutar girin.");
+      return;
+    }
+    if (raw === 0) {
+      window.alert("Degisim 0 olamaz.");
+      return;
+    }
+    const signed = bulkPriceSign === "minus" ? -raw : raw;
+    let changed = 0;
+    const nextRows = categoryProductRows.map((row) => {
+      const nextPrice = applyBulkPriceTl(row.priceTl, signed, bulkPriceMode);
+      let nextWholesale = row.wholesaleTl;
+      let wholesaleChanged = false;
+      if (bulkApplyWholesale && row.sellsWholesale && row.wholesaleTl.trim()) {
+        const w = applyBulkPriceTl(row.wholesaleTl, signed, bulkPriceMode);
+        if (w != null && w !== row.wholesaleTl) {
+          nextWholesale = w;
+          wholesaleChanged = true;
+        }
+      }
+      if (nextPrice == null) return row;
+      if (nextPrice === row.priceTl && !wholesaleChanged) return row;
+      changed += 1;
+      return {
+        ...row,
+        priceTl: nextPrice,
+        ...(wholesaleChanged ? { wholesaleTl: nextWholesale } : {})
+      };
+    });
+    if (changed === 0) {
+      window.alert("Uygulanacak fiyat bulunamadi.");
+      return;
+    }
+    setCategoryProductRows(nextRows);
+    const label =
+      bulkPriceMode === "percent"
+        ? `%${raw}${bulkPriceSign === "minus" ? " indirim" : " zam"}`
+        : `${bulkPriceSign === "minus" ? "-" : "+"}${raw} TL`;
+    setFormMessage(`Toplu fiyat: ${label} — ${changed} urun satirina uygulandi. Kaydet ile kaydedin.`);
   };
 
   useEffect(() => {
@@ -598,7 +664,81 @@ export function CategoryForm({ categories, suppliers, products, onCreated }: Pro
             {categoryProductRows.length === 0 ? (
               <p className="category-edit-products-empty">Bu kategoride aktif urun yok.</p>
             ) : (
-              <div className="category-edit-products">
+              <>
+                <div className="category-bulk-price" aria-label="Kategori toplu fiyat guncelleme">
+                  <div className="category-bulk-price-head">
+                    <strong>Toplu fiyat guncelle</strong>
+                    <span className="muted small">
+                      Satirlara uygular; kaydetmeden once kontrol edin ({categoryProductRows.length} urun).
+                    </span>
+                  </div>
+                  <div className="category-bulk-price-row">
+                    <div className="category-bulk-price-segment" role="group" aria-label="Degisim turu">
+                      <button
+                        type="button"
+                        className={bulkPriceMode === "percent" ? "active" : ""}
+                        disabled={categoryEditSaving}
+                        onClick={() => setBulkPriceMode("percent")}
+                      >
+                        %
+                      </button>
+                      <button
+                        type="button"
+                        className={bulkPriceMode === "amount" ? "active" : ""}
+                        disabled={categoryEditSaving}
+                        onClick={() => setBulkPriceMode("amount")}
+                      >
+                        TL
+                      </button>
+                    </div>
+                    <div className="category-bulk-price-segment" role="group" aria-label="Artis veya indirim">
+                      <button
+                        type="button"
+                        className={bulkPriceSign === "plus" ? "active" : ""}
+                        disabled={categoryEditSaving}
+                        onClick={() => setBulkPriceSign("plus")}
+                      >
+                        +
+                      </button>
+                      <button
+                        type="button"
+                        className={bulkPriceSign === "minus" ? "active" : ""}
+                        disabled={categoryEditSaving}
+                        onClick={() => setBulkPriceSign("minus")}
+                      >
+                        −
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="category-bulk-price-input"
+                      placeholder={bulkPriceMode === "percent" ? "Orn. 10" : "Orn. 50"}
+                      value={bulkPriceValue}
+                      disabled={categoryEditSaving}
+                      onChange={(e) => setBulkPriceValue(e.target.value)}
+                      aria-label={bulkPriceMode === "percent" ? "Yuzde" : "Tutar TL"}
+                    />
+                    <button
+                      type="button"
+                      className="category-bulk-price-apply"
+                      disabled={categoryEditSaving}
+                      onClick={applyCategoryBulkPrices}
+                    >
+                      Satirlara uygula
+                    </button>
+                  </div>
+                  <label className="category-bulk-price-check">
+                    <input
+                      type="checkbox"
+                      checked={bulkApplyWholesale}
+                      disabled={categoryEditSaving}
+                      onChange={(e) => setBulkApplyWholesale(e.target.checked)}
+                    />
+                    Toptan fiyata da uygula
+                  </label>
+                </div>
+                <div className="category-edit-products">
                 <table>
                   <thead>
                     <tr>
@@ -709,6 +849,7 @@ export function CategoryForm({ categories, suppliers, products, onCreated }: Pro
                   </tbody>
                 </table>
               </div>
+              </>
             )}
             <div className="modal-actions">
               <button type="button" disabled={categoryEditSaving} onClick={() => setCategoryEdit(null)}>

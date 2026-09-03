@@ -1,8 +1,13 @@
-export const APP_VERSION = "1.9.26";
-export const APP_RELEASE_DATE = "28 Agustos 2026";
+export const APP_VERSION = "1.9.27";
+export const APP_RELEASE_DATE = "4 Eylul 2026";
 
 /** Hesap → Surumler ekraninda kartlar */
 export const APP_RELEASE_NOTES: { title: string; body: string }[] = [
+  {
+    title: "Etiket 40x20 + kategori fiyat + borc dahil (1.9.27)",
+    body:
+      "Barkod etiketine 40x20 mm eklendi; bos alan doldurma kapandi (urun adi aciklamayi ezmez). Kategori duzenlemede toplu fiyat (% / TL zam-indirim). Satista acik borcu dahil et tiki ile satis+borc birlikte cekilabilir."
+  },
   {
     title: "Yazdir dugmesi takilmasi (1.9.26)",
     body:
@@ -211,9 +216,13 @@ export const APP_RELEASE_NOTES: { title: string; body: string }[] = [
 ];
 
 /** GitHub Release / electron-updater changelog */
-export const RELEASE_CHANGELOG_MD = `## Marina Nargile POS 1.9.26
+export const RELEASE_CHANGELOG_MD = `## Marina Nargile POS 1.9.27
+
+### Yenilik
+- Barkod etiketi 40x20 mm boyutu
+- Kategori bazli toplu fiyat guncelleme (% / TL)
+- Satista acik borcu dahil et (satis + borc birlikte cekim)
 
 ### Duzeltme
-- Barkod Yazdir'da "Yazdiriliyor..." sonsuz kalma duzeltildi
-- Yazdirma iframe ile acilir; Electron yedek yol guvenilir window.print kullanir
+- Etikette bos alan doldurma kapatildi; onizleme ile baski ayni
 `;
