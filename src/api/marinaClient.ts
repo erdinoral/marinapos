@@ -171,6 +171,7 @@ function createDevServerMarinaApi(): MarinaApi {
     getMobileLanPairPayload: () => devInvoke("mobile:get-pair-payload"),
     getMobileLanQrDataUrl: () => devInvoke("mobile:get-qr-dataurl"),
     getMobileApkQrDataUrl: () => devInvoke("mobile:get-apk-qr-dataurl"),
+    allowMobileFirewall: () => devInvoke("mobile:allow-firewall"),
     posCartPull: () => devInvoke("pos-cart:pull"),
     posCartPush: (payload) => devInvoke("pos-cart:push", [payload]),
     posCartAckOps: (opIds: string[]) => devInvoke("pos-cart:ack-ops", [opIds]),
