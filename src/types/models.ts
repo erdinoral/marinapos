@@ -829,6 +829,7 @@ declare global {
       getMobileLanPairPayload: () => Promise<MobileLanPairPayload>;
       getMobileLanQrDataUrl: () => Promise<string>;
       getMobileApkQrDataUrl: () => Promise<string>;
+      allowMobileFirewall: () => Promise<void>;
       posCartPull: () => Promise<import("./sharedPosCart").SharedPosCartSnapshot>;
       posCartPush: (payload: import("./sharedPosCart").SharedPosCartPushInput) => Promise<import("./sharedPosCart").SharedPosCartSnapshot>;
       posCartAckOps: (opIds: string[]) => Promise<import("./sharedPosCart").SharedPosCartSnapshot>;

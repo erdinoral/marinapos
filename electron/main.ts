@@ -145,6 +145,19 @@ ipcMain.handle("mobile:regenerate-token", () => mobileLan.regenerateToken());
 ipcMain.handle("mobile:get-pair-payload", () => mobileLan.getPairPayload());
 ipcMain.handle("mobile:get-qr-dataurl", () => mobileLanQrDataUrl(mobileLan));
 ipcMain.handle("mobile:get-apk-qr-dataurl", () => mobileApkQrDataUrl(mobileLan));
+ipcMain.handle("mobile:allow-firewall", async () => {
+  return new Promise((resolve, reject) => {
+    const { exec } = require("child_process");
+    const script = `Start-Process powershell -Wait -Verb runAs -WindowStyle Hidden -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command \`"netsh advfirewall firewall add rule name='Marina POS Mobile Server' dir=in action=allow protocol=TCP localport=38472 profile=any\`""`;
+    exec(script, { shell: "powershell.exe" }, (error: Error | null, stdout: string, stderr: string) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve({ stdout, stderr });
+      }
+    });
+  });
+});
 
 ipcMain.handle("pos-cart:pull", () => sharedPosCart.getSnapshot());
 ipcMain.handle("pos-cart:push", (_, payload: { activeCartId: number; lines: import("../src/types/sharedPosCart").SharedPosCartLineDto[] }) => {

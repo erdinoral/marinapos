@@ -190,6 +190,7 @@ contextBridge.exposeInMainWorld("marinaApi", {
   getMobileLanPairPayload: () => ipcRenderer.invoke("mobile:get-pair-payload"),
   getMobileLanQrDataUrl: () => ipcRenderer.invoke("mobile:get-qr-dataurl"),
   getMobileApkQrDataUrl: () => ipcRenderer.invoke("mobile:get-apk-qr-dataurl"),
+  allowMobileFirewall: () => ipcRenderer.invoke("mobile:allow-firewall"),
   posCartPull: () => ipcRenderer.invoke("pos-cart:pull"),
   posCartPush: (payload: import("../src/types/sharedPosCart").SharedPosCartPushInput) =>
     ipcRenderer.invoke("pos-cart:push", payload),

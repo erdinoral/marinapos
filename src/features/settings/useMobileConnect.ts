@@ -93,6 +93,23 @@ export function useMobileConnect(active: boolean) {
     return `${status.apkInstallPageUrl} (${formatApkSize(status.apkSizeBytes)})`;
   }, [status]);
 
+  const allowFirewall = async () => {
+    setBusy(true);
+    setMsg("Güvenlik duvarı izni ekleniyor, onay penceresi çıkabilir...");
+    try {
+      if (typeof getMarinaApi().allowMobileFirewall === "function") {
+        await getMarinaApi().allowMobileFirewall();
+        setMsg("Güvenlik duvarı izni başarıyla eklendi.");
+      } else {
+        setMsg("Bu özellik desteklenmiyor.");
+      }
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Güvenlik duvarı izni verilemedi.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return {
     status,
     qrDataUrl,
@@ -104,6 +121,7 @@ export function useMobileConnect(active: boolean) {
     statusLabel: statusLabel(status),
     toggleEnabled,
     regenerate,
-    refresh
+    refresh,
+    allowFirewall
   };
 }

@@ -16,7 +16,8 @@ export function MobileConnectPanel({ active = true, compact = false }: Props) {
     apkHint,
     statusLabel,
     toggleEnabled,
-    regenerate
+    regenerate,
+    allowFirewall
   } = useMobileConnect(active);
 
   return (
@@ -60,6 +61,11 @@ export function MobileConnectPanel({ active = true, compact = false }: Props) {
         <button type="button" disabled={busy || !status?.enabled} onClick={() => void regenerate()}>
           Yeni bağlantı QR
         </button>
+        {status?.enabled ? (
+          <button type="button" disabled={busy} onClick={() => void allowFirewall()}>
+            Güvenlik Duvarı İzni Ver (Bağlantı Sorunu İçin)
+          </button>
+        ) : null}
       </div>
 
       {msg ? <p className="form-message">{msg}</p> : null}

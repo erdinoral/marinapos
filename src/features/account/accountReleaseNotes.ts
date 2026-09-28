@@ -1,8 +1,13 @@
-export const APP_VERSION = "1.9.27";
-export const APP_RELEASE_DATE = "4 Eylul 2026";
+export const APP_VERSION = "1.9.28";
+export const APP_RELEASE_DATE = "28 Eylul 2026";
 
 /** Hesap → Surumler ekraninda kartlar */
 export const APP_RELEASE_NOTES: { title: string; body: string }[] = [
+  {
+    title: "Mobil guvenlik duvari izni (1.9.28)",
+    body:
+      "Telefondan PC'ye baglanamiyorsa Ayarlar mobil panelinde Guvenlik Duvari Izni Ver dugmesi 38472 portunu acar. Ayni is icin Marina-Nargile-GuvenlikDuvari-Izni.bat da eklendi."
+  },
   {
     title: "Etiket 40x20 + kategori fiyat + borc dahil (1.9.27)",
     body:
@@ -216,13 +221,8 @@ export const APP_RELEASE_NOTES: { title: string; body: string }[] = [
 ];
 
 /** GitHub Release / electron-updater changelog */
-export const RELEASE_CHANGELOG_MD = `## Marina Nargile POS 1.9.27
+export const RELEASE_CHANGELOG_MD = `## Marina Nargile POS 1.9.28
 
 ### Yenilik
-- Barkod etiketi 40x20 mm boyutu
-- Kategori bazli toplu fiyat guncelleme (% / TL)
-- Satista acik borcu dahil et (satis + borc birlikte cekim)
-
-### Duzeltme
-- Etikette bos alan doldurma kapatildi; onizleme ile baski ayni
+- Mobil baglanti icin guvenlik duvari izni (TCP 38472) Ayarlardan verilebilir
 `;
