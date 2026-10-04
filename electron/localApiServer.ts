@@ -303,7 +303,7 @@ async function handleRoute(
     json(res, 200, {
       ok: true,
       apiVersion: 2,
-      host: getLanIPv4(),
+      host: requestLanHost(req),
       port: MOBILE_LAN_PORT,
       name: settings.companyName?.trim() || settings.appTitle?.trim() || "Marina Nargile POS",
       version: ctx.appVersion

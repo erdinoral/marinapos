@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { getMarinaApi } from "../../api/marinaClient";
 import type { Category, CategorySaleUnit, Product, Supplier, SupplierInput } from "../../types/models";
 import { formatTry, parseTrAmount, tlToKurus } from "../../utils/currency";
+import { effectiveProductPriceKurus, getCachedUsdTry } from "../../utils/usdPricing";
 import { balanceTlToKurus, confirmDebtBalanceEdit } from "../../utils/confirmDebtBalanceEdit";
 import { totalSupplierDebtKurus } from "../../utils/supplierDebt";
 import {
@@ -69,8 +70,9 @@ type CategoryProductRow = {
 };
 
 function priceTlDisplay(p: Product, unit: CategorySaleUnit): string {
-  if (unit === "gram") return kurusPerGramToTlPer1000g(p.priceKurus).toFixed(2);
-  return (p.priceKurus / 100).toFixed(2);
+  const kurus = effectiveProductPriceKurus(p);
+  if (unit === "gram") return kurusPerGramToTlPer1000g(kurus).toFixed(2);
+  return (kurus / 100).toFixed(2);
 }
 
 function wholesaleTlDisplay(p: Product, unit: CategorySaleUnit): string {
@@ -183,7 +185,8 @@ export function CategoryForm({ categories, suppliers, products, onCreated }: Pro
     setBulkApplyWholesale(true);
   };
 
-  const applyCategoryBulkPrices = () => {
+  const applyCategoryBulkPrices = async () => {
+    if (!categoryEdit) return;
     const raw = parseTrAmount(String(bulkPriceValue).trim());
     if (raw == null || raw < 0) {
       window.alert(bulkPriceMode === "percent" ? "Gecerli bir yuzde girin." : "Gecerli bir tutar girin.");
@@ -219,12 +222,49 @@ export function CategoryForm({ categories, suppliers, products, onCreated }: Pro
       window.alert("Uygulanacak fiyat bulunamadi.");
       return;
     }
-    setCategoryProductRows(nextRows);
-    const label =
-      bulkPriceMode === "percent"
-        ? `%${raw}${bulkPriceSign === "minus" ? " indirim" : " zam"}`
-        : `${bulkPriceSign === "minus" ? "-" : "+"}${raw} TL`;
-    setFormMessage(`Toplu fiyat: ${label} — ${changed} urun satirina uygulandi. Kaydet ile kaydedin.`);
+    const unit = categoryEditUnit;
+    const usdTry = getCachedUsdTry();
+    const changedRows = nextRows.filter((row, i) => row !== categoryProductRows[i]);
+    if (changedRows.some((row) => products.find((p) => p.id === row.productId)?.pricedInUsd) && (usdTry == null || usdTry <= 0)) {
+      window.alert("Dolar bazli urun var ama guncel USD kuru yok. Alt bardaki kuru yenileyip tekrar deneyin.");
+      return;
+    }
+    setCategoryEditSaving(true);
+    try {
+      for (const row of changedRows) {
+        const product = products.find((p) => p.id === row.productId);
+        const priceTl = parseTrAmount(String(row.priceTl).trim());
+        const wholesaleTl = parseTrAmount(String(row.wholesaleTl).trim());
+        if (priceTl == null || priceTl < 0) throw new Error(`"${row.name}" icin gecerli satis fiyati yok.`);
+        const priceKurus = unit === "gram" ? tlPer1000gToKurusPerGram(priceTl) : tlToKurus(priceTl);
+        const wholesalePriceKurus =
+          row.sellsWholesale && wholesaleTl != null && wholesaleTl > 0
+            ? unit === "gram"
+              ? tlPer1000gToKurusPerGram(wholesaleTl)
+              : tlToKurus(wholesaleTl)
+            : 0;
+        await getMarinaApi().updateProduct(row.productId, {
+          priceKurus,
+          wholesalePriceKurus,
+          ...(product?.pricedInUsd && usdTry
+            ? { pricedInUsd: true, priceUsdCents: Math.max(0, Math.round(priceKurus / usdTry)) }
+            : {})
+        });
+      }
+      setCategoryProductRows(nextRows);
+      const label =
+        bulkPriceMode === "percent"
+          ? `%${raw}${bulkPriceSign === "minus" ? " indirim" : " zam"}`
+          : `${bulkPriceSign === "minus" ? "-" : "+"}${raw} TL`;
+      const savedNote = `Toplu fiyat kaydedildi: ${label} — ${changed} urun.`;
+      setFormMessage(savedNote);
+      window.alert(savedNote);
+      await onCreated();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Toplu fiyat kaydedilemedi.");
+    } finally {
+      setCategoryEditSaving(false);
+    }
   };
 
   useEffect(() => {
@@ -669,7 +709,7 @@ export function CategoryForm({ categories, suppliers, products, onCreated }: Pro
                   <div className="category-bulk-price-head">
                     <strong>Toplu fiyat guncelle</strong>
                     <span className="muted small">
-                      Satirlara uygular; kaydetmeden once kontrol edin ({categoryProductRows.length} urun).
+                      Secilen oran veya tutar urunlere hemen yazilir ({categoryProductRows.length} urun).
                     </span>
                   </div>
                   <div className="category-bulk-price-row">
@@ -723,9 +763,9 @@ export function CategoryForm({ categories, suppliers, products, onCreated }: Pro
                       type="button"
                       className="category-bulk-price-apply"
                       disabled={categoryEditSaving}
-                      onClick={applyCategoryBulkPrices}
+                      onClick={() => void applyCategoryBulkPrices()}
                     >
-                      Satirlara uygula
+                      Fiyatlari kaydet
                     </button>
                   </div>
                   <label className="category-bulk-price-check">

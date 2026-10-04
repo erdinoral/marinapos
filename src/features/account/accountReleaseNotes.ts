@@ -1,8 +1,13 @@
-export const APP_VERSION = "1.9.28";
-export const APP_RELEASE_DATE = "28 Eylul 2026";
+export const APP_VERSION = "1.9.29";
+export const APP_RELEASE_DATE = "4 Ekim 2026";
 
 /** Hesap → Surumler ekraninda kartlar */
 export const APP_RELEASE_NOTES: { title: string; body: string }[] = [
+  {
+    title: "Toplu fiyat kaydi + mobil baglanti (1.9.29)",
+    body:
+      "Kategori toplu fiyat (% veya TL) artik satirda kalmaz, urunlere hemen yazilir; dolar bazli urunde kur uzerinden dolar fiyati da guncellenir. Mobil eslesme telefonun ulastigi adresi tutar, 127.0.0.1 ile ezmez."
+  },
   {
     title: "Mobil guvenlik duvari izni (1.9.28)",
     body:
@@ -221,7 +226,13 @@ export const APP_RELEASE_NOTES: { title: string; body: string }[] = [
 ];
 
 /** GitHub Release / electron-updater changelog */
-export const RELEASE_CHANGELOG_MD = `## Marina Nargile POS 1.9.28
+export const RELEASE_CHANGELOG_MD = `## Marina Nargile POS 1.9.29
+
+### Duzeltme
+- Kategori toplu fiyat (% ve TL) urunlere hemen kaydedilir; dolar bazli satis fiyati da kurdan guncellenir
+- Mobil eslesme, telefonun ulastigi PC adresini tutar (127.0.0.1 ile ezilmez)
+
+## Marina Nargile POS 1.9.28
 
 ### Yenilik
 - Mobil baglanti icin guvenlik duvari izni (TCP 38472) Ayarlardan verilebilir
