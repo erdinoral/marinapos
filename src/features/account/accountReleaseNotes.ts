@@ -1,8 +1,13 @@
-export const APP_VERSION = "1.9.29";
-export const APP_RELEASE_DATE = "4 Ekim 2026";
+export const APP_VERSION = "1.9.30";
+export const APP_RELEASE_DATE = "9 Ekim 2026";
 
 /** Hesap → Surumler ekraninda kartlar */
 export const APP_RELEASE_NOTES: { title: string; body: string }[] = [
+  {
+    title: "Hatali toplu zam geri alma (1.9.30)",
+    body:
+      "Kategori toplu fiyatta kayittan once eski ve yeni fiyat sorulur. Yuzde 100 ve ustu indirim fiyati sifirlamaz. Zami geri al, yazilan yuzdeyi boler: %440 zam sonrasi 2.970 TL yeniden 550 TL olur."
+  },
   {
     title: "Toplu fiyat kaydi + mobil baglanti (1.9.29)",
     body:
@@ -226,7 +231,13 @@ export const APP_RELEASE_NOTES: { title: string; body: string }[] = [
 ];
 
 /** GitHub Release / electron-updater changelog */
-export const RELEASE_CHANGELOG_MD = `## Marina Nargile POS 1.9.29
+export const RELEASE_CHANGELOG_MD = `## Marina Nargile POS 1.9.30
+
+### Duzeltme
+- Toplu fiyat kaydindan once eski ve yeni fiyat gosterilir
+- Zami geri al, yanlis yuzde zami boler (%440 sonrasi fiyat 5,4'e bolunur)
+
+## Marina Nargile POS 1.9.29
 
 ### Duzeltme
 - Kategori toplu fiyat (% ve TL) urunlere hemen kaydedilir; dolar bazli satis fiyati da kurdan guncellenir

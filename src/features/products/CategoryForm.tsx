@@ -117,11 +117,27 @@ function formatBulkPriceTl(n: number): string {
   return v.toFixed(2);
 }
 
-function applyBulkPriceTl(rawTl: string, signedDelta: number, mode: "percent" | "amount"): string | null {
+function applyBulkPriceTl(
+  rawTl: string,
+  raw: number,
+  mode: "percent" | "amount",
+  direction: "apply" | "undo",
+  sign: "plus" | "minus"
+): string | null {
   const n = parseTrAmount(String(rawTl).trim());
   if (n == null || n < 0) return null;
+  if (direction === "undo") {
+    if (mode === "percent") {
+      const factor = 1 + raw / 100;
+      if (factor <= 0) return null;
+      return formatBulkPriceTl(n / factor);
+    }
+    return formatBulkPriceTl(n - raw);
+  }
   if (n === 0 && mode === "percent") return formatBulkPriceTl(0);
-  const next = mode === "percent" ? n * (1 + signedDelta / 100) : n + signedDelta;
+  const signed = sign === "minus" ? -raw : raw;
+  if (mode === "percent" && 1 + signed / 100 <= 0) return null;
+  const next = mode === "percent" ? n * (1 + signed / 100) : n + signed;
   return formatBulkPriceTl(next);
 }
 
@@ -185,7 +201,7 @@ export function CategoryForm({ categories, suppliers, products, onCreated }: Pro
     setBulkApplyWholesale(true);
   };
 
-  const applyCategoryBulkPrices = async () => {
+  const applyCategoryBulkPrices = async (direction: "apply" | "undo" = "apply") => {
     if (!categoryEdit) return;
     const raw = parseTrAmount(String(bulkPriceValue).trim());
     if (raw == null || raw < 0) {
@@ -196,14 +212,18 @@ export function CategoryForm({ categories, suppliers, products, onCreated }: Pro
       window.alert("Degisim 0 olamaz.");
       return;
     }
+    if (direction === "apply" && bulkPriceMode === "percent" && bulkPriceSign === "minus" && raw >= 100) {
+      window.alert("Yuzde 100 ve ustu indirim fiyati sifirlar. Yapilan bir zami geri almak icin Zami geri al dugmesini kullan.");
+      return;
+    }
     const signed = bulkPriceSign === "minus" ? -raw : raw;
     let changed = 0;
     const nextRows = categoryProductRows.map((row) => {
-      const nextPrice = applyBulkPriceTl(row.priceTl, signed, bulkPriceMode);
+      const nextPrice = applyBulkPriceTl(row.priceTl, raw, bulkPriceMode, direction, bulkPriceSign);
       let nextWholesale = row.wholesaleTl;
       let wholesaleChanged = false;
       if (bulkApplyWholesale && row.sellsWholesale && row.wholesaleTl.trim()) {
-        const w = applyBulkPriceTl(row.wholesaleTl, signed, bulkPriceMode);
+        const w = applyBulkPriceTl(row.wholesaleTl, raw, bulkPriceMode, direction, bulkPriceSign);
         if (w != null && w !== row.wholesaleTl) {
           nextWholesale = w;
           wholesaleChanged = true;
@@ -220,6 +240,29 @@ export function CategoryForm({ categories, suppliers, products, onCreated }: Pro
     });
     if (changed === 0) {
       window.alert("Uygulanacak fiyat bulunamadi.");
+      return;
+    }
+    const samples = nextRows
+      .filter((row, i) => row !== categoryProductRows[i])
+      .slice(0, 3)
+      .map((row) => {
+        const before = categoryProductRows.find((r) => r.productId === row.productId)?.priceTl ?? "?";
+        return `${row.name}: ${before} TL → ${row.priceTl} TL`;
+      })
+      .join("\n");
+    const modeLine =
+      direction === "undo"
+        ? bulkPriceMode === "percent"
+          ? `%${raw} zam geri alinacak. Fiyat ${((1 + raw / 100)).toFixed(2)}'e bolunur.`
+          : `Eklenen ${raw} TL geri alinacak.`
+        : bulkPriceMode === "percent"
+          ? `%${raw} ${bulkPriceSign === "minus" ? "indirim" : "zam"} fiyati ${raw > 100 ? `${(1 + signed / 100).toFixed(2)} katina cikarir` : "orani kadar degistirir"}. TL eklemek istiyorsan iptal edip TL'yi sec.`
+          : `${bulkPriceSign === "minus" ? "-" : "+"}${raw} TL eklenecek. Fiyati bu rakama esitlemek icin bu ekran kullanilmaz.`;
+    if (
+      !window.confirm(
+        `${modeLine}\n\n${samples}\n\n${changed} urun kaydedilsin mi?${bulkApplyWholesale ? "\nToptan fiyatlar da ayni oranda degisecek." : ""}`
+      )
+    ) {
       return;
     }
     const unit = categoryEditUnit;
@@ -253,9 +296,13 @@ export function CategoryForm({ categories, suppliers, products, onCreated }: Pro
       }
       setCategoryProductRows(nextRows);
       const label =
-        bulkPriceMode === "percent"
-          ? `%${raw}${bulkPriceSign === "minus" ? " indirim" : " zam"}`
-          : `${bulkPriceSign === "minus" ? "-" : "+"}${raw} TL`;
+        direction === "undo"
+          ? bulkPriceMode === "percent"
+            ? `%${raw} zam geri alindi`
+            : `${raw} TL geri alindi`
+          : bulkPriceMode === "percent"
+            ? `%${raw}${bulkPriceSign === "minus" ? " indirim" : " zam"}`
+            : `${bulkPriceSign === "minus" ? "-" : "+"}${raw} TL`;
       const savedNote = `Toplu fiyat kaydedildi: ${label} — ${changed} urun.`;
       setFormMessage(savedNote);
       window.alert(savedNote);
@@ -709,7 +756,7 @@ export function CategoryForm({ categories, suppliers, products, onCreated }: Pro
                   <div className="category-bulk-price-head">
                     <strong>Toplu fiyat guncelle</strong>
                     <span className="muted small">
-                      Secilen oran veya tutar urunlere hemen yazilir ({categoryProductRows.length} urun).
+                      Zam geri almak icin ayni yuzdeyi yazip Zami geri al ({categoryProductRows.length} urun).
                     </span>
                   </div>
                   <div className="category-bulk-price-row">
@@ -763,9 +810,17 @@ export function CategoryForm({ categories, suppliers, products, onCreated }: Pro
                       type="button"
                       className="category-bulk-price-apply"
                       disabled={categoryEditSaving}
-                      onClick={() => void applyCategoryBulkPrices()}
+                      onClick={() => void applyCategoryBulkPrices("apply")}
                     >
                       Fiyatlari kaydet
+                    </button>
+                    <button
+                      type="button"
+                      className="category-bulk-price-apply"
+                      disabled={categoryEditSaving}
+                      onClick={() => void applyCategoryBulkPrices("undo")}
+                    >
+                      Zami geri al
                     </button>
                   </div>
                   <label className="category-bulk-price-check">
